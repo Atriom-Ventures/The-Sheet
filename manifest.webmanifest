@@ -1,0 +1,22 @@
+{
+  "name": "MultiTool",
+  "short_name": "MultiTool",
+  "description": "An offline shift tool: checklists, cards, counts and messages. Holds no data itself.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#15202A",
+  "theme_color": "#15202A",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Shift note", "short_name": "Note", "url": "./#now/note", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Count", "short_name": "Count", "url": "./#count", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Floor", "short_name": "Floor", "url": "./#lead/floor", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

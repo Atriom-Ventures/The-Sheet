@@ -45,7 +45,7 @@ function listView(id) {
   if (!l) return empty('That checklist isn’t in the book anymore. <button class="link inline" data-act="go" data-id="#book/lists">All checklists</button>');
   const its = tasksOf(l.id), done = its.filter((t) => isTicked(t.id)).length;
   let h = '<button class="back" data-act="go" data-id="#book/lists">' + ICON.chevL + ' Checklists</button>';
-  h += '<h1 class="list-h">' + esc(l.name) + (l.draft ? ' <span class="badge">Draft</span>' : '') + '</h1><p class="when-line">' + esc(whenText(l)) + ' · ' + esc(roleName(l.role)) + '</p>';
+  h += '<h2 class="list-h">' + esc(l.name) + (l.draft ? ' <span class="badge">Draft</span>' : '') + '</h2><p class="when-line">' + esc(whenText(l)) + ' · ' + esc(roleName(l.role)) + '</p>';
   if (l.note) h += '<p class="note">' + withBlanks(l.note) + '</p>';
   if (!l.standards) {
     h += '<div class="sum"><div class="sum-n" id="sum-n">' + done + '<span>/' + its.length + '</span></div><div class="sum-t">Done today<span>Ticks reset at midnight. They stay on this phone.</span></div><div class="sum-bar"><span id="sum-bar" style="width:' + (its.length ? done / its.length * 100 : 0).toFixed(1) + '%"></span></div></div>';

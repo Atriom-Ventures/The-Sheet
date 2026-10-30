@@ -29,7 +29,7 @@ function askRow(f) {
   return '<li class="ask' + (f.status === 'done' ? ' done' : '') + '"><div class="ask-main"><div class="ask-meta mono">' + (f.kind === 'flag' ? '<span class="pill late">Flag</span> ' : '') + 'To ' + esc(f.to || '—') + ' · ' + esc(fmtShort(f.created)) +
     (f.status !== 'done' ? ' · <span class="age' + ageCls + '">' + (age ? age + (age === 1 ? ' day' : ' days') : 'today') + '</span>' : '') + '</div>' +
     '<div class="ask-t">' + esc(f.text) + '</div>' + (f.answer ? '<div class="ask-a"><b>Answer' + (f.answered ? ' ' + esc(fmtShort(f.answered)) : '') + ':</b> ' + esc(f.answer) + '</div>' : '') + '</div>' +
-    '<div class="ask-acts">' + (f.status !== 'done' ? '<button class="btn small" data-act="ask-answer" data-id="' + esc(f.id) + '">' + ICON.check + '</button>' : '<button class="btn small ghost" data-act="ask-reopen" data-id="' + esc(f.id) + '">Reopen</button>') +
+    '<div class="ask-acts">' + (f.status !== 'done' ? '<button class="btn small" data-act="ask-answer" data-id="' + esc(f.id) + '" aria-label="Mark answered">' + ICON.check + '</button>' : '<button class="btn small ghost" data-act="ask-reopen" data-id="' + esc(f.id) + '">Reopen</button>') +
     '<button class="icon-b" data-act="ask-edit" data-id="' + esc(f.id) + '" aria-label="Edit">' + ICON.pencil + '</button></div></li>';
 }
 function asksView() {
@@ -49,7 +49,7 @@ function asksView() {
   }
   const blanks = bookBlanks();
   if (blanks.length) {
-    h += '<div class="row-h"><h2 class="sec-h">Blanks in the book <span class="mono small">' + blanks.reduce((n, b) => n + b.blanks.length, 0) + '</span></h2><div class="row-acts"><button class="btn small ghost" data-act="blanks-copy">' + ICON.copy + '</button></div></div>' +
+    h += '<div class="row-h"><h2 class="sec-h">Blanks in the book <span class="mono small">' + blanks.reduce((n, b) => n + b.blanks.length, 0) + '</span></h2><div class="row-acts"><button class="btn small ghost" data-act="blanks-copy" aria-label="Copy the list of blanks">' + ICON.copy + '</button></div></div>' +
       '<p class="hint">Anything in [brackets] in a card or checklist. Fill them in by editing the card.</p><ul class="card-list">' +
       blanks.map((b) => '<li><button class="card-row" data-act="' + (b.kind === 'card' ? 'open-card' : b.kind === 'task' ? 'task-edit' : 'asg-edit') + '" data-id="' + esc(b.id) + '"><span class="cat">' + (b.kind === 'card' ? 'Card' : b.kind === 'task' ? 'Checklist' : 'Assignment sheet') + (b.draft ? ' · Draft' : '') + '</span><span class="c-title">' + esc(b.title) + '</span><span class="c-why">' + b.blanks.map((x) => '<mark class="blank">' + esc(x) + '</mark>').join(' ') + '</span></button></li>').join('') + '</ul>';
   }
@@ -70,7 +70,7 @@ function blanksMessage() {
 function editAsk(id) {
   const f = (L().follow || []).find((x) => x.id === id); if (!f) return;
   openSheet({ eyebrow: 'Follow-up', title: 'Edit', body: '<div class="form">' + field('ae2-text', 'What', textarea('ae2-text', f.text, 3)) + field('ae2-to', 'To', input('ae2-to', f.to, 'list="ask-people"'), '', 'half') + field('ae2-date', 'Asked on', '<input id="ae2-date" type="date" value="' + esc(f.created) + '">', '', 'half') + field('ae2-ans', 'Answer', textarea('ae2-ans', f.answer || '', 2), 'Optional') + '</div>',
-    foot: '<button class="btn danger" data-act="ask-del" data-id="' + esc(id) + '">' + ICON.trash + '</button><button class="btn primary" data-act="ask-save" data-id="' + esc(id) + '">Save</button>' });
+    foot: '<button class="btn danger" data-act="ask-del" data-id="' + esc(id) + '" aria-label="Delete">' + ICON.trash + '</button><button class="btn primary" data-act="ask-save" data-id="' + esc(id) + '">Save</button>' });
 }
 function answerAsk(id) {
   const f = (L().follow || []).find((x) => x.id === id); if (!f) return;
@@ -143,7 +143,7 @@ function editPerson(id) {
       field('fp-in', 'In', '<input id="fp-in" type="time" value="' + esc(p.in) + '">', '', 'half') + field('fp-out', 'Out', '<input id="fp-out" type="time" value="' + esc(p.out) + '">', '', 'half') +
       ((p.breaks || []).length ? '<div class="full"><span class="lbl">Breaks today</span><ul class="plain-list">' + p.breaks.map((b) => '<li>' + (b.type === 'meal' ? 'Meal' : 'Rest') + ' ' + fmt12(toMin(b.start)) + '–' + (b.end ? fmt12(toMin(b.end)) : 'now') + '</li>').join('') + '</ul></div>' : '') +
     '</div>',
-    foot: (id ? '<button class="btn danger" data-act="fp-del" data-id="' + esc(id) + '">' + ICON.trash + '</button>' : '') + '<button class="btn primary" data-act="fp-save" data-id="' + esc(id || '') + '">Save</button>' });
+    foot: (id ? '<button class="btn danger" data-act="fp-del" data-id="' + esc(id) + '" aria-label="Remove from the floor">' + ICON.trash + '</button>' : '') + '<button class="btn primary" data-act="fp-save" data-id="' + esc(id || '') + '">Save</button>' });
 }
 
 /* ---------- training (people are phone only; skills live in the book) ---------- */
@@ -164,7 +164,7 @@ function openTrainee(id) {
   const p = S.trainees.find((x) => x.id === id); if (!p) return;
   const [d, n] = trProgress(p);
   openSheet({ eyebrow: 'Training · ' + d + '/' + n, title: p.name, body: '<div id="tr-skills">' + trSkills(p) + '</div><div class="form" style="margin-top:14px">' + field('tr-note', 'Notes', textarea('tr-note', p.note || '', 2, 'data-trnote="' + esc(p.id) + '"'), 'Phone only') + '</div>',
-    foot: '<button class="btn danger" data-act="tr-del" data-id="' + esc(id) + '">' + ICON.trash + '</button><button class="btn ghost" data-act="tr-copy" data-id="' + esc(id) + '">' + ICON.copy + ' Progress</button><button class="btn primary" data-act="sheet-close">Done</button>', onClose: () => app.renderView() });
+    foot: '<button class="btn danger" data-act="tr-del" data-id="' + esc(id) + '" aria-label="Delete trainee">' + ICON.trash + '</button><button class="btn ghost" data-act="tr-copy" data-id="' + esc(id) + '">' + ICON.copy + ' Progress</button><button class="btn primary" data-act="sheet-close">Done</button>', onClose: () => app.renderView() });
 }
 function trText(p) {
   const so = p.signoffs || {}, sk = B().training || [];
@@ -192,7 +192,7 @@ function printedView() {
   h += P.length ? '<ul class="asks">' + P.map((p) => {
     const st = isStale(p);
     return '<li class="ask' + (st.stale ? ' stale' : '') + '"><div class="ask-main"><div class="ask-meta mono">' + (st.gone ? '<span class="pill">Gone</span> ' : st.stale ? '<span class="pill late">Out of date</span> ' : '<span class="pill ok">Current</span> ') + 'Printed ' + esc(fmtShort(p.date)) + ' · rev ' + esc(fmtRev(p.rev)) + (st.stale ? ' → now ' + esc(fmtRev(st.rev)) : '') + '</div><div class="ask-t">' + esc(p.label) + '</div><div class="ask-a">' + esc(p.where) + '</div></div>' +
-      '<div class="ask-acts">' + (st.stale ? '<button class="btn small" data-act="printed-reprint" data-id="' + esc(p.id) + '">' + ICON.print + '</button>' : '') + '<button class="icon-b" data-act="printed-del" data-id="' + esc(p.id) + '" aria-label="Remove">' + ICON.trash + '</button></div></li>';
+      '<div class="ask-acts">' + (st.stale ? '<button class="btn small" data-act="printed-reprint" data-id="' + esc(p.id) + '" aria-label="Print a fresh copy">' + ICON.print + '</button>' : '') + '<button class="icon-b" data-act="printed-del" data-id="' + esc(p.id) + '" aria-label="Remove">' + ICON.trash + '</button></div></li>';
   }).join('') + '</ul>' : empty('Nothing logged yet. When you print, say where it’s going and it shows up here.', true);
   return h;
 }

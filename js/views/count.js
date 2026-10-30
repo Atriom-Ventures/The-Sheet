@@ -228,9 +228,9 @@ function productRow(line, p, multi) {
   const v = S.count.counts[p.id], seen = seenFor(p.id), label = p.name || line.name;
   return '<div class="prod' + (v != null ? ' done' : '') + '">' +
     (multi ? '<div class="pinfo"><div class="pname">' + esc(label) + (p.pref ? ' <span class="star">★ Order this</span>' : '') + '</div><div class="pmeta">' + productDesc(line, p, false) + '</div></div>' : '') +
-    '<div class="pctl"><div class="stepper"><button class="step" data-act="inv-dec" data-pid="' + esc(p.id) + '" aria-label="One less">−</button>' +
+    '<div class="pctl"><div class="stepper"><button class="step" data-act="inv-dec" data-pid="' + esc(p.id) + '" aria-label="Minus one, ' + esc(label) + '">−</button>' +
     '<input class="qty" id="q-' + esc(p.id) + '" data-qty="' + esc(p.id) + '" inputmode="decimal" enterkeyhint="done" autocomplete="off" value="' + (v == null ? '' : esc(fmtNum(v))) + '" placeholder="–" aria-label="' + esc(label) + ' on hand">' +
-    '<button class="step" data-act="inv-inc" data-pid="' + esc(p.id) + '" aria-label="One more">+</button></div><span class="unit">' + esc(unitWord(line.unit, 2)) + '</span></div>' +
+    '<button class="step" data-act="inv-inc" data-pid="' + esc(p.id) + '" aria-label="Plus one, ' + esc(label) + '">+</button></div><span class="unit">' + esc(unitWord(line.unit, 2)) + '</span></div>' +
     '<div class="quick" id="QK-' + esc(p.id) + '">' + quick(line, p) + '</div>' +
     (seen && !lastFor(p.id) && v == null ? '<div class="seen">In the ' + fmtShort(seen.date) + ' photos: ' + esc(seen.text) + '</div>' : '') + '</div>';
 }
@@ -282,7 +282,7 @@ function refreshProduct(pid) {
     const head = document.getElementById('LH-' + line.id); if (head) head.innerHTML = lineHead(line, st);
     const v = S.count.counts[pid], inp = document.getElementById('q-' + pid);
     if (inp && document.activeElement !== inp) { inp.value = v == null ? '' : fmtNum(v); }
-    if (inp) inp.classList.remove('bad');
+    if (inp) { inp.classList.remove('bad'); inp.removeAttribute('aria-invalid'); }
     const row = inp && inp.closest('.prod'); if (row) { row.classList.toggle('done', v != null); const s = row.querySelector('.seen'); if (s && v != null) s.remove(); }
     const qk = document.getElementById('QK-' + pid), p = line.products.find((x) => x.id === pid); if (qk && p) qk.innerHTML = quick(line, p);
   }
@@ -296,20 +296,20 @@ function orderRow(o) {
   const p = prefProduct(o.l), pd = p ? [p.brand, p.code].filter(Boolean).join(' ') : '';
   const extra = pd ? ' · ' + esc(pd) : (o.l.products.length > 1 ? ' · <em>pick which product</em>' : '');
   return '<div class="orow' + (o.qty > 0 ? '' : ' skip') + '" id="O-' + esc(o.l.id) + '"><span class="otick" aria-hidden="true"></span><div class="oinfo"><div class="lname">' + esc(o.l.name) + '</div><div class="lmeta">have ' + esc(fmtQty(o.st.total, o.l.unit)) + ' · min ' + esc(fmtQty(o.l.par, o.l.unit)) + extra + '</div></div>' +
-    '<div class="pctl oqty"><div class="stepper"><button class="step" data-act="ord-dec" data-line="' + esc(o.l.id) + '" aria-label="Order one less">−</button><input class="qty" id="oq-' + esc(o.l.id) + '" data-oline="' + esc(o.l.id) + '" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="' + esc(fmtNum(o.qty)) + '" aria-label="Order amount for ' + esc(o.l.name) + '"><button class="step" data-act="ord-inc" data-line="' + esc(o.l.id) + '" aria-label="Order one more">+</button></div><span class="unit">' + esc(unitWord(o.sug.unit, 2)) + '</span></div></div>';
+    '<div class="pctl oqty"><div class="stepper"><button class="step" data-act="ord-dec" data-line="' + esc(o.l.id) + '" aria-label="Order minus one, ' + esc(o.l.name) + '">−</button><input class="qty" id="oq-' + esc(o.l.id) + '" data-oline="' + esc(o.l.id) + '" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="' + esc(fmtNum(o.qty)) + '" aria-label="Order amount for ' + esc(o.l.name) + '"><button class="step" data-act="ord-inc" data-line="' + esc(o.l.id) + '" aria-label="Order plus one, ' + esc(o.l.name) + '">+</button></div><span class="unit">' + esc(unitWord(o.sug.unit, 2)) + '</span></div></div>';
 }
 const simpleRow = (name, value, small) => '<div class="srow2"><span>' + esc(name) + '</span><span class="v">' + esc(value) + (small ? '<small>' + esc(small) + '</small>' : '') + '</span></div>';
 function orderTab() {
   const r = computeOrder();
   let h = openOrdersHTML() + '<p class="hint">' + r.counted + ' of ' + r.total + ' items counted. Anything below its minimum lands here with a suggested amount you can change.</p>';
-  h += '<h3 class="sub-title go">To order <span class="n">' + r.order.length + '</span></h3>';
+  h += '<h2 class="sub-title go">To order <span class="n">' + r.order.length + '</span></h2>';
   if (!r.counted) h += empty('Nothing counted yet. Count on the Count tab and anything below its minimum shows up here.');
   else if (!r.order.length) h += empty('Nothing counted so far is below its minimum.');
   else h += '<div class="olist">' + r.order.map(orderRow).join('') + '</div>';
-  if (r.plenty.length) h += '<h3 class="sub-title">Plenty on hand, don’t order <span class="n">' + r.plenty.length + '</span></h3><p class="hint">Three times the minimum or more.</p><div class="olist">' + r.plenty.map((o) => simpleRow(o.l.name, fmtQty(o.st.total, o.l.unit), 'min ' + fmtQty(o.l.par, o.l.unit))).join('') + '</div>';
-  if (r.nopar.length) h += '<h3 class="sub-title">Counted, no minimum yet <span class="n">' + r.nopar.length + '</span></h3><p class="hint">Set a minimum in Items and they’ll be ordered automatically next time.</p><div class="olist">' + r.nopar.map((o) => simpleRow(o.l.name, fmtQty(o.st.total, o.l.unit))).join('') + '</div>';
-  if (r.pick.length) h += '<h3 class="sub-title">Pick one product to reorder <span class="n">' + r.pick.length + '</span></h3><p class="hint">More than one product counts toward each of these. In Items, mark the one to keep buying with “Order this one”.</p><div class="olist">' + r.pick.map((l) => simpleRow(l.name, l.products.length + ' products')).join('') + '</div>';
-  h += '<h3 class="sub-title">Message for ' + esc(I().messaging || 'team chat') + '</h3><pre class="chit" id="order-text">' + esc(orderText(r)) + '</pre>';
+  if (r.plenty.length) h += '<h2 class="sub-title">Plenty on hand, don’t order <span class="n">' + r.plenty.length + '</span></h2><p class="hint">Three times the minimum or more.</p><div class="olist">' + r.plenty.map((o) => simpleRow(o.l.name, fmtQty(o.st.total, o.l.unit), 'min ' + fmtQty(o.l.par, o.l.unit))).join('') + '</div>';
+  if (r.nopar.length) h += '<h2 class="sub-title">Counted, no minimum yet <span class="n">' + r.nopar.length + '</span></h2><p class="hint">Set a minimum in Items and they’ll be ordered automatically next time.</p><div class="olist">' + r.nopar.map((o) => simpleRow(o.l.name, fmtQty(o.st.total, o.l.unit))).join('') + '</div>';
+  if (r.pick.length) h += '<h2 class="sub-title">Pick one product to reorder <span class="n">' + r.pick.length + '</span></h2><p class="hint">More than one product counts toward each of these. In Items, mark the one to keep buying with “Order this one”.</p><div class="olist">' + r.pick.map((l) => simpleRow(l.name, l.products.length + ' products')).join('') + '</div>';
+  h += '<h2 class="sub-title">Message for ' + esc(I().messaging || 'team chat') + '</h2><pre class="chit" id="order-text">' + esc(orderText(r)) + '</pre>';
   h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button>' + (ro() ? '' : '<button class="btn" data-act="count-save">' + ICON.check + ' Save count</button>') + '</div>';
   if (!ro()) h += '<p class="hint">Save count adds it to History, where everyone who orders can see it and mark it placed, and starts a fresh count.</p>';
   if (r.todo.length) h += '<details class="todo-list"><summary>Not counted yet (' + r.todo.length + ')</summary><p>' + r.todo.map((l) => esc(l.name)).join(' · ') + '</p></details>';
@@ -362,7 +362,7 @@ function itemEditor(l) {
     '<div class="field"><label for="ie-cat-' + lid + '">Section</label><select id="ie-cat-' + lid + '" data-ie="cat" data-line="' + lid + '">' + opts(I().cats.map((c) => [c.id, c.name]), l.cat) + '</select></div>' +
     '<div class="field wide"><label for="ie-state-' + lid + '">Status</label><select id="ie-state-' + lid + '" data-ie="state" data-line="' + lid + '">' + opts(STATES, l.state) + '</select></div>' +
     '<div class="field wide"><label for="ie-note-' + lid + '">Note</label><input id="ie-note-' + lid + '" data-ie="note" data-line="' + lid + '" value="' + esc(l.note || '') + '"></div></div>';
-  h += '<h4>Products <small>' + (l.products.length > 1 ? 'They add up toward one minimum' : '') + '</small></h4>';
+  h += '<h3 class="ed-h">Products <small>' + (l.products.length > 1 ? 'They add up toward one minimum' : '') + '</small></h3>';
   l.products.forEach((p) => {
     const pid = esc(p.id);
     h += '<div class="pedit"><div class="grid2">' +
@@ -445,11 +445,12 @@ export const acts = {
   'prod-del': (el) => { if (!armed(el, 'Remove?')) return; const l = findLineOfProduct(el.dataset.pid); if (!l) return; if (l.products.length < 2) { toast('A line needs at least one product. Delete the line instead.'); return; } editLine(l.id, (x) => { x.products = x.products.filter((p) => p.id !== el.dataset.pid); }); delete S.count.counts[el.dataset.pid]; save('count'); redrawItem(l.id); }
 };
 
+const NUM_HELP = 'That isn’t a number this can read. Try 2, 2.5, 2 1/2 or ½.';
 const saveItemField = debounce((el) => {
   if (el.dataset.ie) {
     const k = el.dataset.ie, id = el.dataset.line;
     let v = el.value;
-    if (k === 'par') { v = v.trim() === '' ? null : parseQty(v); if (Number.isNaN(v)) { el.classList.add('bad'); return; } el.classList.remove('bad'); }
+    if (k === 'par') { v = v.trim() === '' ? null : parseQty(v); if (Number.isNaN(v)) { el.classList.add('bad'); el.setAttribute('aria-invalid', 'true'); toast(NUM_HELP); return; } el.classList.remove('bad'); el.removeAttribute('aria-invalid'); }
     if (k === 'step') v = +v;
     if (k === 'name' && !v.trim()) return;
     editLine(id, (l) => { l[k] = v; });
@@ -467,8 +468,8 @@ export function onInput(el, ev) {
   if (el.dataset.qty) {
     if (ev.type !== 'change' && ev.type !== 'input') return true;
     const v = parseQty(el.value);
-    if (Number.isNaN(v)) { el.classList.add('bad'); return true; }
-    el.classList.remove('bad');
+    if (Number.isNaN(v)) { el.classList.add('bad'); el.setAttribute('aria-invalid', 'true'); if (ev.type === 'change') toast(NUM_HELP); return true; }
+    el.classList.remove('bad'); el.removeAttribute('aria-invalid');
     if (v == null) delete S.count.counts[el.dataset.qty]; else S.count.counts[el.dataset.qty] = Math.max(0, v);
     save('count');
     if (ev.type === 'change') refreshProduct(el.dataset.qty);

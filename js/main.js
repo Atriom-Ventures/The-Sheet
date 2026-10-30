@@ -16,13 +16,14 @@ import * as shift from './shift.js';
 import * as msgs from './msgs.js';
 import * as print from './print.js';
 
-app.version = '1.3.0';
+app.version = '1.4.0';
 const VIEWS = { now, book, count, lead, more, quick };
 const TABS = [['now', 'Now', ICON.now], ['book', 'Book', ICON.book], ['count', 'Count', ICON.count], ['lead', 'Lead', ICON.lead], ['more', 'More', ICON.more]];
 const INV_TABS = ['count', 'more'];
 const tabsNow = () => (appMode() === 'inv' ? TABS.filter((t) => INV_TABS.includes(t[0])) : TABS);
 [now, book, count, lead, more, quick, cards, shift, msgs, print].forEach((m) => app.register(m));
 
+let booted = false;
 /* ---------- routing ---------- */
 function parseHash() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ''));
@@ -61,10 +62,19 @@ function renderNav() {
   n.classList.toggle('two', appMode() === 'inv');
   n.innerHTML = tabsNow().map(([id, label, icon]) => '<button class="nav-b' + (cur === id ? ' on' : '') + '" data-act="tab" data-id="' + id + '" aria-current="' + (cur === id ? 'page' : 'false') + '">' + icon + '<span>' + label + '</span>' + (id === 'lead' && leadDot() ? '<i class="nav-dot"></i>' : '') + '</button>').join('');
 }
+/* Each screen gets a heading for screen readers and its own page title (WCAG 2.4.2, 1.3.1). */
+const SUB_NAMES = { count: { order: 'Order', history: 'History', items: 'Items' }, book: { cards: 'Cards', sheet: 'Assignment sheet', day: 'The day', list: 'Checklist' }, lead: { floor: 'Floor', msgs: 'Messages', train: 'Training', wins: 'Wins', printed: 'Printed copies' } };
+function screenName() {
+  const r = app.route, tab = (TABS.find((t) => t[0] === r.tab) || [])[1] || (r.tab === 'quick' ? 'Quick view' : 'The Sheet');
+  const sub = SUB_NAMES[r.tab] && SUB_NAMES[r.tab][r.sub];
+  return sub ? tab + ': ' + sub : tab;
+}
 app.renderView = () => {
   const v = $('#view'); if (!v) return;
   const mod = VIEWS[app.route.tab] || now;
-  try { v.innerHTML = mod.render(app.route); }
+  const name = screenName();
+  document.title = name + ' · The Sheet';
+  try { v.innerHTML = '<h1 class="sr" id="screen-h" tabindex="-1">' + esc(name) + '</h1>' + mod.render(app.route); }
   catch (e) { console.error(e); v.innerHTML = '<p class="empty">Something went wrong drawing this screen: ' + esc(e.message) + '. Your data is safe. <button class="link inline" data-act="tab" data-id="now">Go to Now</button></p>'; }
   document.body.classList.toggle('editing', !!app.ui.editing);
   document.body.classList.toggle('quick', app.route.tab === 'quick');
@@ -86,7 +96,11 @@ function route() {
   if (prev.tab !== app.route.tab) { app.ui.editing = app.route.tab === 'book' ? app.ui.editing : false; if (app.route.tab === 'now') now.resetNow(); }
   if (isSheetOpen()) closeSheet(true);
   app.render();
-  if (prev.tab !== app.route.tab || prev.sub !== app.route.sub || prev.id !== app.route.id) window.scrollTo(0, 0);
+  if (prev.tab !== app.route.tab || prev.sub !== app.route.sub || prev.id !== app.route.id) {
+    window.scrollTo(0, 0);
+    // Tell screen-reader users where they landed (not on first load).
+    if (booted) { const hd = $('#screen-h'); if (hd) { try { hd.focus({ preventScroll: true }); } catch (e) { /* ignore */ } } }
+  }
 }
 
 /* ---------- events ---------- */
@@ -201,6 +215,7 @@ async function registerSW() {
   app.route = parseHash();
   if (!location.hash) { const m = appMode(); if (m === 'none') location.replace('#more'); else if (m === 'inv') location.replace('#count'); }
   route();
+  booted = true;
   iosBanner();
   registerSW();
   autoSync('open', 1200);

@@ -27,6 +27,21 @@ Synced files are tied to the repo's id, so renaming the repo or the organization
 
 Adding a new part means a new repo, a new connection in `js/sync.js` and its screens; access to it then works the same way.
 
+## Accessibility
+
+Target: WCAG 2.2 level AA. Checked on 10/29/26 (1.4.0), by script and by reading the code, not yet with a screen reader on a phone:
+
+- **Contrast (1.4.3, 1.4.11):** every text color on every background it's used on, in light and dark, is at least 4.5:1; form-field borders, the focus ring and the selected-tab mark are at least 3:1. `--band-text` is the blue for text, because `--band` is too dark for text in dark mode.
+- **Names and labels (1.1.1, 1.3.1, 3.3.2, 4.1.2):** every field has a label; every button has a name, including icon-only ones; count steppers say which item they change ("Plus one, Coffee Lids"); decorative icons are hidden from screen readers.
+- **Structure (1.3.1, 2.4.2, 2.4.6):** each screen has one page heading and its own page title, with no skipped heading levels. When the screen changes, focus moves to its heading so screen readers say where you are.
+- **Sheets (2.4.3):** dialogs are modal; the page behind them is inert while one is open, and focus returns afterwards.
+- **No time limits (2.2.1):** tap-twice deletes stay armed until you tap again or tap anything else, and the prompt is announced.
+- **Errors (3.3.1):** a number the app can't read is marked invalid for screen readers, shown by more than color, and explained in words.
+- **Targets and focus (2.5.8, 2.4.7, 2.4.11):** everything tappable is at least 24×24 px (most are 40 px or more); focus is always outlined and scrolls clear of the fixed header and tab bar.
+- **Also:** smallest text is 12 px; motion is off when the phone asks for reduced motion; pinch zoom is never blocked.
+
+Still to do: a pass with TalkBack (Android) and VoiceOver (iPhone); the printed cards are separate work.
+
 ## Sync
 
 - Works offline after the first load (service worker). Data lives in IndexedDB on the phone.

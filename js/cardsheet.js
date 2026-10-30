@@ -100,7 +100,7 @@ function editTask(id, listId, blockId) {
       (l && l.byBlock ? field('te-block', 'When', '<select id="te-block">' + opts(blockOpts, t.block) + '</select>') : '') +
       field('te-card', 'How-to card', '<select id="te-card">' + opts(cardOpts, t.card || '') + '</select>', 'Optional. Adds a “How” button.') +
     '</div>',
-    foot: (id ? '<button class="btn danger" data-act="task-del" data-id="' + esc(id) + '">' + ICON.trash + '</button><button class="btn ghost" data-act="task-move" data-id="' + esc(id) + '" data-dir="-1" aria-label="Move up">' + ICON.up + '</button><button class="btn ghost" data-act="task-move" data-id="' + esc(id) + '" data-dir="1" aria-label="Move down">' + ICON.down + '</button>' : '') +
+    foot: (id ? '<button class="btn danger" data-act="task-del" data-id="' + esc(id) + '" aria-label="Delete item">' + ICON.trash + '</button><button class="btn ghost" data-act="task-move" data-id="' + esc(id) + '" data-dir="-1" aria-label="Move up">' + ICON.up + '</button><button class="btn ghost" data-act="task-move" data-id="' + esc(id) + '" data-dir="1" aria-label="Move down">' + ICON.down + '</button>' : '') +
       '<button class="btn primary" data-act="task-save" data-id="' + esc(id || '') + '" data-list="' + esc(t.list) + '">Save</button>'
   });
 }

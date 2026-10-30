@@ -38,7 +38,7 @@ function hero(st, idx) {
   else if (live && st.after) { eyebrow = 'Done for today'; meta = 'Tomorrow starts at ' + fmt12(b.s); }
   else { eyebrow = 'Looking ahead'; meta = fmt12(b.s) + '–' + fmt12(b.e); }
   const prev = bl[idx - 1], next = bl[idx + 1];
-  return '<div class="eyebrow">' + esc(eyebrow) + '</div><h1 class="block-name">' + esc(b.name) + '</h1><div class="block-meta mono">' + esc(meta) + '</div>' + extra + (b.focus ? '<p class="focus">' + esc(b.focus) + '</p>' : '') +
+  return '<div class="eyebrow">' + esc(eyebrow) + '</div><h2 class="block-name">' + esc(b.name) + '</h2><div class="block-meta mono">' + esc(meta) + '</div>' + extra + (b.focus ? '<p class="focus">' + esc(b.focus) + '</p>' : '') +
     '<div class="blk-nav">' + (prev ? '<button data-act="blk" data-id="' + (idx - 1) + '">' + ICON.chevL + '<span>' + esc(prev.name) + '</span></button>' : '<span></span>') +
     (live ? '' : '<button class="now-b" data-act="blk-now">Back to now</button>') +
     (next ? '<button data-act="blk" data-id="' + (idx + 1) + '"><span>' + esc(next.name) + '</span>' + ICON.chevR + '</button>' : '<span></span>') + '</div>';
@@ -73,7 +73,7 @@ function mineHTML() {
   const t = nowMin(), mine = myAsg(), everyone = B().assignments.filter((a) => a.shift === 'all');
   const mixed = mine.some((a) => a.shift === 'am') && mine.some((a) => a.shift === 'pm');
   const next = mine.find((a) => a.time && !isTicked(a.id) && toMin(a.time) >= t - 10);
-  let h = '<div class="row-h"><h2 class="sec-h">My jobs today</h2><div class="row-acts">' + (mine.length ? '<button class="btn small ghost" data-act="copy-mine">' + ICON.copy + '</button>' : '') + '<button class="btn small" data-act="pick">' + (mine.length ? 'Change' : 'Pick my jobs') + '</button></div></div>';
+  let h = '<div class="row-h"><h2 class="sec-h">My jobs today</h2><div class="row-acts">' + (mine.length ? '<button class="btn small ghost" data-act="copy-mine" aria-label="Copy my jobs">' + ICON.copy + '</button>' : '') + '<button class="btn small" data-act="pick">' + (mine.length ? 'Change' : 'Pick my jobs') + '</button></div></div>';
   if (!mine.length) h += empty('Tap <b>Pick my jobs</b> and choose the ones with your name on today’s assignment sheet. They show up here with their times.', true);
   else h += '<ul class="tasks">' + mine.map((a) => asgRow(a, t, next && next.id, mixed, false)).join('') + '</ul>';
   if (everyone.length) h += '<span class="lbl ev">Everyone, all day</span><ul class="tasks">' + everyone.map((a) => asgRow(a, t, null, false, false)).join('') + '</ul>';
@@ -111,7 +111,7 @@ function backupBanner() {
 }
 
 export function render() {
-  if (!hasBook()) return '<section class="hero"><div class="eyebrow">Welcome</div><h1 class="block-name">The Sheet</h1><p class="focus">Nothing is loaded yet. Connect your book or import a backup to get started.</p><div class="blk-nav"><button class="now-b" data-act="tab" data-id="more">Set up</button></div></section>';
+  if (!hasBook()) return '<section class="hero"><div class="eyebrow">Welcome</div><h2 class="block-name">The Sheet</h2><p class="focus">Nothing is loaded yet. Connect your book or import a backup to get started.</p><div class="blk-nav"><button class="now-b" data-act="tab" data-id="more">Set up</button></div></section>';
   const st = blockState(), bl = st.bl;
   let h = '';
   if (bl.length) {

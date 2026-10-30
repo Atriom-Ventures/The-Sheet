@@ -220,7 +220,7 @@ export function openTmpl(id) {
   openSheet({
     eyebrow: T.kicker, title: T.title,
     body: (T.note ? '<p class="note">' + esc(T.note) + '</p>' : '') + '<div id="tmpl-form">' + T.form(cur.v) + '</div><div class="preview"><span class="lbl">Preview</span><pre class="chit" id="chit"></pre></div>',
-    foot: '<button class="btn ghost" data-act="tmpl-reset">Clear</button><button class="btn ghost" data-act="tmpl-share">' + ICON.share + '</button><button class="btn primary" data-act="tmpl-copy">' + ICON.copy + ' Copy' + (B().messaging ? ' for ' + esc(B().messaging) : '') + '</button>',
+    foot: '<button class="btn ghost" data-act="tmpl-reset">Clear</button><button class="btn ghost" data-act="tmpl-share" aria-label="Share">' + ICON.share + '</button><button class="btn primary" data-act="tmpl-copy">' + ICON.copy + ' Copy' + (B().messaging ? ' for ' + esc(B().messaging) : '') + '</button>',
     onMount: () => update(false), onClose: () => { cur = null; }
   });
 }

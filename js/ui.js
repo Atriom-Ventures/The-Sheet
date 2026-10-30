@@ -52,7 +52,7 @@ export function openSheet({ eyebrow = '', title = '', body = '', foot = '', onMo
   closeSheet(true);
   if (!replacing) lastFocus = document.activeElement;
   const wrap = $('#sheet-root');
-  wrap.innerHTML = '<div class="sheet-wrap"><div class="backdrop" data-act="sheet-close"></div>' +
+  wrap.innerHTML = '<div class="sheet-wrap"><div class="backdrop" data-act="sheet-close" aria-hidden="true"></div>' +
     '<div class="sheet' + (wide ? ' wide' : '') + '" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabindex="-1">' +
       '<div class="sheet-h"><div class="sheet-ht">' + (eyebrow ? '<div class="sheet-eb">' + esc(eyebrow) + '</div>' : '') + '<h2 class="sheet-title" id="sheet-title">' + esc(title) + '</h2></div>' +
       '<button class="icon-b" data-act="sheet-close" aria-label="Close">' + ICON.close + '</button></div>' +
@@ -60,11 +60,17 @@ export function openSheet({ eyebrow = '', title = '', body = '', foot = '', onMo
       (foot ? '<div class="sheet-f" id="sheet-f">' + foot + '</div>' : '') +
     '</div></div>';
   document.body.classList.add('locked');
+  setInert(true); // keep screen readers and keyboards inside the sheet while it's open
   sheetOnClose = onClose; sheetOpen = true;
   const sh = wrap.querySelector('.sheet');
   try { sh.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
   if (onMount) onMount(sh);
   if (!replacing) history.pushState({ sheet: true }, '');
+}
+function setInert(on) {
+  const a = $('#app'); if (!a) return;
+  a.inert = on;
+  if (on) a.setAttribute('aria-hidden', 'true'); else a.removeAttribute('aria-hidden');
 }
 /* Returns a promise that settles once the browser history has caught up, so callers can navigate safely after it. */
 let pendingBack = null;
@@ -73,6 +79,7 @@ export function closeSheet(silent) {
   sheetOpen = false;
   $('#sheet-root').innerHTML = '';
   document.body.classList.remove('locked');
+  setInert(false);
   const cb = sheetOnClose; sheetOnClose = null;
   let done = Promise.resolve();
   if (!silent && history.state && history.state.sheet) {
@@ -92,12 +99,28 @@ export function setSheetBody(html) { const b = $('#sheet-b'); if (b) b.innerHTML
 export function setSheetTitle(t) { const h = $('#sheet-title'); if (h) h.textContent = t; }
 
 /* ---------- two-tap confirm for anything destructive ---------- */
+// No time limit (WCAG 2.2.1): the button stays armed until it's tapped again or something else is.
+let armedBtn = null, armedOld = '', armedLabel = null;
+function disarm() {
+  if (!armedBtn) return;
+  const b = armedBtn; armedBtn = null;
+  if (document.contains(b)) { b.dataset.armed = ''; b.classList.remove('armed'); b.innerHTML = armedOld; if (armedLabel != null) b.setAttribute('aria-label', armedLabel); else b.removeAttribute('aria-label'); }
+}
+document.addEventListener('click', (ev) => { if (armedBtn && !armedBtn.contains(ev.target)) disarm(); }, true);
 export function armed(btn, label = 'Tap again to confirm') {
-  if (btn.dataset.armed === '1') return true;
-  const old = btn.innerHTML;
-  btn.dataset.armed = '1'; btn.classList.add('armed'); btn.textContent = label;
-  setTimeout(() => { if (document.contains(btn)) { btn.dataset.armed = ''; btn.classList.remove('armed'); btn.innerHTML = old; } }, 3500);
+  if (btn.dataset.armed === '1') { armedBtn = null; return true; }
+  disarm();
+  armedBtn = btn; armedOld = btn.innerHTML; armedLabel = btn.getAttribute('aria-label');
+  btn.dataset.armed = '1'; btn.classList.add('armed'); btn.textContent = label; btn.removeAttribute('aria-label');
+  announce(label + '. Tap again to confirm, or tap anywhere else to cancel.');
   return false;
+}
+
+/* Say something to screen readers without showing it (WCAG 4.1.3). */
+export function announce(msg) {
+  const el = $('#sr-live'); if (!el) return;
+  el.textContent = '';
+  setTimeout(() => { el.textContent = msg; }, 50);
 }
 
 /* ---------- small builders ---------- */

@@ -16,7 +16,7 @@ import * as shift from './shift.js';
 import * as msgs from './msgs.js';
 import * as print from './print.js';
 
-app.version = '1.4.0';
+app.version = '1.4.1';
 const VIEWS = { now, book, count, lead, more, quick };
 const TABS = [['now', 'Now', ICON.now], ['book', 'Book', ICON.book], ['count', 'Count', ICON.count], ['lead', 'Lead', ICON.lead], ['more', 'More', ICON.more]];
 const INV_TABS = ['count', 'more'];

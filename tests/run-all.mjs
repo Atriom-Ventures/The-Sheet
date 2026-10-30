@@ -24,6 +24,7 @@ function step(label, cmd, args, opts = {}) {
 const node = process.execPath;
 // Sync runs in three time zones, including the two furthest from UTC, to catch date bugs.
 for (const tz of ['UTC', 'Pacific/Kiritimati', 'Pacific/Pago_Pago']) step('Sync, ' + tz, node, [path.join(HERE, 'sync.test.mjs')], { env: { TZ: tz } });
+step('Order amounts, shared text', node, [path.join(HERE, 'count.test.mjs')]);
 step('Every screen draws', node, [path.join(HERE, 'shell.test.mjs')]);
 step('Tap-twice confirm', node, [path.join(HERE, 'confirm.test.mjs')]);
 const r = step('Draw screens for the markup check', node, [path.join(HERE, 'a11y', 'render.mjs')], { capture: true });

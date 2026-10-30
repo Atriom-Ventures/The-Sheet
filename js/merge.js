@@ -9,7 +9,8 @@
 
 import { same, clone } from './util.js';
 
-let PREFER = 'phone'; // 'remote' on a first sync with a repo: GitHub's shared copy wins differences
+let PREFER = 'phone'; // 'remote' on a first sync with a repo, or when this phone can't send: GitHub's copy wins differences
+let NOTE = '';
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const isIdArray = (a) => Array.isArray(a) && a.length > 0 && a.every((x) => isObj(x) && typeof x.id === 'string');
@@ -23,7 +24,7 @@ function mergeValue(base, local, remote, path, conflicts) {
     return mergeArrays(base || [], local || [], remote || [], path, conflicts);
   }
   if (isObj(local) && isObj(remote)) return mergeObjects(isObj(base) ? base : {}, local, remote, path, conflicts);
-  if (PREFER === 'remote') { conflicts.push({ path, kept: 'github', theirs: clone(remote), ours: clone(local), note: 'First sync with this repo: GitHub’s version kept' }); return clone(remote); }
+  if (PREFER === 'remote') { conflicts.push({ path, kept: 'github', theirs: clone(remote), ours: clone(local), note: NOTE || 'First sync with this repo: GitHub’s version kept' }); return clone(remote); }
   conflicts.push({ path, kept: 'phone', theirs: clone(remote), ours: clone(local) });
   return clone(local);
 }
@@ -98,8 +99,35 @@ export function mergeDoc(base, local, remote, opts) {
   if (local == null) return { doc: clone(remote), conflicts };
   if (remote == null) return { doc: clone(local), conflicts };
   PREFER = opts && opts.prefer === 'remote' ? 'remote' : 'phone';
+  NOTE = (opts && opts.note) || '';
   try {
     const doc = mergeValue(base == null ? {} : base, local, remote, '', conflicts);
     return { doc, conflicts };
-  } finally { PREFER = 'phone'; }
+  } finally { PREFER = 'phone'; NOTE = ''; }
+}
+
+/* Paths in merge notes look like .lines[ln_x].products[p_y].par: a field after a dot, an item id in
+   brackets. Only the document's own fields are followed. */
+function pathToks(path) {
+  const toks = [];
+  String(path || '').replace(/\.([^.[\]]+)|\[([^\]]+)\]/g, (m, k, id) => { toks.push(k != null ? { k } : { id }); return m; });
+  return toks;
+}
+const own = (node, k) => isObj(node) && Object.prototype.hasOwnProperty.call(node, k);
+const stepInto = (node, t) => (t.k != null ? (own(node, t.k) ? node[t.k] : undefined) : (Array.isArray(node) ? node.find((x) => isObj(x) && x.id === t.id) : undefined));
+export function getAtPath(doc, path) {
+  let node = doc;
+  for (const t of pathToks(path)) { node = stepInto(node, t); if (node === undefined) return undefined; }
+  return node;
+}
+/* Put a value back at a path (the other phone's value, for "Use theirs"). False if the item is gone. */
+export function setAtPath(doc, path, value) {
+  const toks = pathToks(path);
+  if (!toks.length) return false;
+  let node = doc;
+  for (let i = 0; i < toks.length - 1; i++) { node = stepInto(node, toks[i]); if (!isObj(node) && !Array.isArray(node)) return false; }
+  const last = toks[toks.length - 1];
+  if (last.k == null || !isObj(node)) return false;
+  if (value === undefined) delete node[last.k]; else node[last.k] = clone(value);
+  return true;
 }

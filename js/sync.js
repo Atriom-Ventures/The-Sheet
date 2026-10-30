@@ -9,7 +9,7 @@
 // Sync runs when you tap Sync, and quietly on its own when the app opens or a count is saved.
 
 import { S, save, flush, migrateHistory, whoAmI, SYNCED, dirty, hasBook, hasInv } from './state.js';
-import { mergeDoc } from './merge.js';
+import { mergeDoc, getAtPath } from './merge.js';
 import { clone, same } from './util.js';
 
 const API = 'https://api.github.com';
@@ -107,7 +107,7 @@ async function repoMeta(c) {
   if (res.status === 404) throw new SyncError('Can’t see ' + repoLabel(c) + '. Either the name is wrong, the key wasn’t made for it (for an organization’s repo, the key’s owner has to be the organization), or your access was removed.', 404);
   if (!res.ok) throw new SyncError('GitHub error ' + res.status + ' checking ' + repoLabel(c) + '.', res.status);
   const j = await res.json();
-  return { id: j.id != null ? String(j.id) : null, push: !(j.permissions && j.permissions.push === false), branch: j.default_branch || c.branch || 'main', private: !!j.private };
+  return { id: j.id != null ? String(j.id) : null, push: !(j.permissions && j.permissions.push === false), branch: j.default_branch || c.branch || 'main', private: typeof j.private === 'boolean' ? j.private : null };
 }
 
 async function getFile(path, c) {
@@ -152,6 +152,28 @@ function whoChanged(doc, path) {
   return '';
 }
 
+/* Keep a record of changes both sides made, so nothing is dropped without a trace. */
+function noteConflicts(key, path, conflicts, review, remoteJson, report) {
+  if (!conflicts.length) return;
+  report.conflicts += conflicts.length;
+  if (review) report.review += conflicts.length;
+  const at = new Date().toISOString();
+  S.conflicts = (S.conflicts || []).concat(conflicts.map((cf) => Object.assign({ id: 'cf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), key, file: path, at, review, who: whoChanged(remoteJson, cf.path) }, cf))).slice(-50);
+  save('conflicts');
+}
+
+/* A clash card is about the phone's value at the time. Once that value has changed again (a newer
+   change came in, or it was changed here), the card is out of date: acting on it could undo the newer
+   change, so it goes. */
+function dropStaleClashes() {
+  const list = S.conflicts || [];
+  const keep = list.filter((cf) => {
+    if (!cf.review || cf.note || !S[cf.key] || !S[cf.key].local) return true;
+    return same(getAtPath(S[cf.key].local, cf.path), cf.ours);
+  });
+  if (keep.length !== list.length) { S.conflicts = keep; save('conflicts'); }
+}
+
 /* One file: pull, merge, push if this phone has anything new and is allowed to. */
 async function syncOne(key, report, meta, attempt = 0) {
   const c = target(key);
@@ -166,21 +188,32 @@ async function syncOne(key, report, meta, attempt = 0) {
   // A different repo than last time: nothing on the phone has been synced with it yet.
   const fresh = slot.src !== rid;
   if (fresh) { slot.base = null; slot.sha = null; slot.src = rid; }
-  const writable = !meta || meta.push;
+  // View only, or the repo has gone public: read, but send nothing.
+  const writable = !meta || (meta.push && meta.private !== false);
   const remote = await getFile(path, c);
   const who = whoAmI();
   const msg = (verb) => verb + ' ' + path + (who ? ' (' + who + ')' : '');
   if (!writable) {
-    // View only: take GitHub's copy as it is. Anything changed on this phone stays here, unsent.
-    if (remote && (remote.sha !== slot.sha || !same(slot.local, slot.base))) { if (remote.sha !== slot.sha) report.pulled.push(key); slot.local = clone(remote.json); slot.base = clone(remote.json); slot.sha = remote.sha; }
+    // Take GitHub's copy, and keep anything changed on this phone on top of it, unsent: it goes up if
+    // sending becomes possible again. Where both changed the same thing, GitHub's version wins here, so
+    // a later send can't quietly undo someone else's change.
+    if (remote && remote.sha !== slot.sha) {
+      report.pulled.push(key);
+      const m = mergeDoc(slot.base, slot.local, remote.json, { prefer: 'remote', note: 'Couldn’t send this phone’s version, so GitHub’s was kept' });
+      slot.local = m.doc; slot.base = clone(remote.json); slot.sha = remote.sha;
+      noteConflicts(key, path, m.conflicts, false, remote.json, report);
+    }
     if (remote) slot.syncedAt = new Date().toISOString();
     return;
   }
   if (!remote) {
     if (slot.local) {
-      const r = await putFile(path, slot.local, null, msg('Add'), c);
+      const sent = clone(slot.local);
+      const r = await putFile(path, sent, null, msg('Add'), c);
       if (r.conflict) { if (attempt < 1) return syncOne(key, report, meta, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
-      slot.base = clone(slot.local); slot.sha = r.sha; slot.syncedAt = new Date().toISOString(); report.pushed.push(key);
+      // GitHub now has exactly what was sent. Anything changed on the phone while it was sending stays, for next time.
+      slot.base = sent; slot.sha = r.sha; slot.syncedAt = new Date().toISOString(); report.pushed.push(key);
+      if (!same(slot.local, sent)) report.again = true;
     }
     return;
   }
@@ -201,19 +234,22 @@ async function syncOne(key, report, meta, attempt = 0) {
   if (same(next, remote.json)) {
     slot.local = clone(remote.json); slot.base = clone(remote.json); slot.sha = remote.sha;
   } else {
-    const r = await putFile(path, next, remote.sha, msg('Update'), c);
+    // Snapshots: exactly what GitHub will hold, and the phone's copy it was made from. Saving a count
+    // or editing an item while this is on its way changes the phone's copy, and that must not be lost.
+    const sent = clone(next), had = clone(slot.local);
+    const r = await putFile(path, sent, remote.sha, msg('Update'), c);
     if (r.conflict) { if (attempt < 1) return syncOne(key, report, meta, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
-    slot.local = clone(next); slot.base = clone(next); slot.sha = r.sha; report.pushed.push(key);
+    slot.base = clone(sent); slot.sha = r.sha; report.pushed.push(key);
+    if (same(slot.local, had)) slot.local = clone(sent);
+    else {
+      // Changed here while sending: put those changes on top of what was sent; they go next time.
+      const m = mergeDoc(had, slot.local, sent);
+      slot.local = m.doc; conflicts = conflicts.concat(m.conflicts);
+      report.again = true;
+    }
   }
   slot.syncedAt = new Date().toISOString();
-  if (conflicts.length) {
-    report.conflicts += conflicts.length;
-    const review = INV_KEYS.includes(key) && !fresh;
-    if (review) report.review += conflicts.length;
-    const at = new Date().toISOString();
-    S.conflicts = (S.conflicts || []).concat(conflicts.map((cf) => Object.assign({ id: 'cf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), key, file: path, at, review, who: whoChanged(remote.json, cf.path) }, cf))).slice(-50);
-    save('conflicts');
-  }
+  noteConflicts(key, path, conflicts, INV_KEYS.includes(key) && !fresh, remote.json, report);
 }
 
 let running = null;
@@ -234,6 +270,8 @@ export function syncAll() {
           metas[w] = m;
           S.settings.perm = Object.assign({}, S.settings.perm, { [w]: { push: m.push, id: m.id, at: new Date().toISOString() } });
           if (!m.push) report.readOnly.push(w);
+          // These repos must stay private. If one has been made public, keep reading it but send nothing.
+          if (m.private === false) addErr(new SyncError(repoLabel(conn(w)) + ' is public on GitHub, so nothing is being sent to it. Make it private again in its settings; until then, changes stay on this phone.', 0));
         } catch (e) {
           addErr(e);
           if (e.status === 404 || e.status === 401) S.settings.perm = Object.assign({}, S.settings.perm, { [w]: { push: false, lost: true, at: new Date().toISOString() } });
@@ -249,10 +287,13 @@ export function syncAll() {
       if (migrateHistory()) {
         for (const key of ['state', 'counts']) { const w = connOf(key); if (w && metas[w]) { try { await syncOne(key, report, metas[w]); } catch (e) { addErr(e); } } }
       }
+      dropStaleClashes();
       if (!report.errors.length) { S.settings.lastSync = new Date().toISOString(); S.settings.lastSyncError = ''; }
       else S.settings.lastSyncError = report.errors[0].message || 'Sync didn’t finish.';
       save('settings');
       await flush();
+      // Something was saved or edited while this sync was sending: send it shortly, without waiting for a tap.
+      if (report.again) autoSync('save', 1500);
       return report;
     } finally { running = null; }
   })();

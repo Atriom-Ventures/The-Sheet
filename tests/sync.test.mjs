@@ -64,6 +64,7 @@ globalThis.fetch = async (url, opts = {}) => {
     const text = Buffer.from(body.content, 'base64').toString('utf8');
     const ns = sha(text + Date.now() + Math.random());
     repo.files[p] = { text, sha: ns, message: body.message };
+    if (GH.hold) await GH.hold(p); // the write has landed, but the answer is slow (weak signal)
     return res(200, { content: { sha: ns } });
   }
   return res(405, {});
@@ -308,5 +309,100 @@ A.st.edit('inv', (inv) => { inv.lines[0].note = 'after disconnect'; });
 r = await A.sy.syncAll();
 check(GH.repos['owner/book'].files['inventory.json'].sha === mbInvBefore, 'inventory does not fall back to the old book repo');
 check(/Not connected/.test(A.more.render()), 'More shows inventory as not connected');
+
+/* Two fresh count-only phones on the (renamed) shared repo for the scenarios below. */
+const SHARED = 'renamed-team/inventory';
+GH.tokens['tok-e'] = [SHARED]; GH.tokens['tok-f'] = [SHARED];
+const invOnly = (tok, ini) => ({ settings: { invOwner: 'renamed-team', invRepo: 'inventory', invToken: tok, invBranch: 'main', initials: ini, setupDone: true, created: '2026-10-30T00:00:00Z' } });
+const E = await boot('E', invOnly('tok-e', 'EE'));
+const F = await boot('F', invOnly('tok-f', 'FF'));
+await E.sy.syncAll(); await F.sy.syncAll();
+const wait = (ms) => new Promise((res) => setTimeout(res, ms));
+const newest = (P) => P.S.counts.local.history.slice().sort((a, b) => b.savedAt.localeCompare(a.savedAt))[0];
+const lineIn = (doc, id) => doc.lines.find((l) => l.id === id);
+const puts = () => GH.calls.filter((c) => c.startsWith('PUT')).length;
+/* Start a sync and hold GitHub's answer to one file's write until finish() is called. */
+async function syncHolding(P, file) {
+  let release = null;
+  GH.hold = (p) => (p === file ? new Promise((res) => { release = res; }) : null);
+  const done = P.sy.syncAll();
+  for (let i = 0; i < 400 && !release; i++) await wait(5);
+  GH.hold = null;
+  return { held: !!release, finish: () => { if (release) release(); return done; } };
+}
+
+console.log('\n16. Changes made while a sync is sending');
+E.st.edit('inv', (inv) => { lineIn(inv, L1.id).note = 'before the sync'; });
+let s = await syncHolding(E, 'inventory.json');
+check(s.held, '(setup: an item change is on its way to GitHub)');
+E.st.edit('inv', (inv) => { lineIn(inv, L2.id).note = 'while sending'; });
+await s.finish();
+check(lineIn(E.S.inv.local, L2.id).note === 'while sending' && E.st.dirty('inv'), 'an item change made while sending stays, marked as waiting to go');
+await wait(2200);
+check(lineIn(readJSON(SHARED, 'inventory.json'), L2.id).note === 'while sending', '…and goes to GitHub on its own right after');
+F.st.edit('inv', (inv) => { lineIn(inv, L2.id).name += ' (big)'; });
+await F.sy.syncAll(); await E.sy.syncAll();
+check(lineIn(E.S.inv.local, L2.id).note === 'while sending' && / \(big\)$/.test(lineIn(E.S.inv.local, L2.id).name), 'after the other phone edits the same line, both changes are there');
+GH.offline = true;
+F.S.count.counts[L1.products[0].id] = 0; F.act('count-save');
+E.S.count.counts[L1.products[0].id] = 1; E.act('count-save');
+await wait(700);
+GH.offline = false;
+await F.sy.syncAll();
+s = await syncHolding(E, 'counts.json');
+check(s.held, '(setup: E’s counts, merged with F’s, are on their way)');
+E.S.count.counts[L1.products[0].id] = 2; E.act('count-save');
+const late = newest(E).id;
+await s.finish();
+check(E.S.counts.local.history.some((h) => h.id === late), 'a count saved while sending is still on the phone');
+await wait(2200); await F.sy.syncAll();
+check(readJSON(SHARED, 'counts.json').history.some((h) => h.id === late) && F.S.counts.local.history.some((h) => h.id === late), '…and reaches GitHub and the other phone');
+
+console.log('\n17. A clash card that has gone out of date');
+const setPar = (P, v) => P.st.edit('inv', (inv) => { lineIn(inv, L2.id).par = v; });
+setPar(E, 5); setPar(F, 6);
+await E.sy.syncAll(); r = await F.sy.syncAll();
+const oldClash = F.S.conflicts.find((c) => c.review) || {};
+check(r.review === 1 && oldClash.ours === 6 && oldClash.theirs === 5, '(setup: F has a clash to review, 6 vs EE’s 5)');
+await E.sy.syncAll(); setPar(E, 8); await E.sy.syncAll(); // EE sees 6, settles on 8
+await F.sy.syncAll();
+check(lineIn(F.S.inv.local, L2.id).par === 8 && !F.S.conflicts.some((c) => c.id === oldClash.id), 'once a newer value arrives, the old clash card goes away');
+F.act('clash-theirs', { id: oldClash.id }); // a tap on the old card, still on screen
+await wait(1200); await F.sy.syncAll(); await E.sy.syncAll();
+check([lineIn(E.S.inv.local, L2.id).par, lineIn(F.S.inv.local, L2.id).par, lineIn(readJSON(SHARED, 'inventory.json'), L2.id).par].join() === '8,8,8', 'the newer 8 isn’t undone by the old card');
+
+console.log('\n18. Access changes to view only while a count waits to go');
+GH.offline = true;
+F.S.count.counts[L1.products[0].id] = 0; F.act('count-save');
+await wait(700);
+const waiting = newest(F).id;
+setPar(F, 11); // and an item change made offline
+GH.offline = false;
+E.S.count.counts[L1.products[0].id] = 3; E.act('count-save'); setPar(E, 12);
+await wait(700); await E.sy.syncAll();
+const sharedSince = newest(E).id;
+readOnly.add('tok-f');
+const putsBefore18 = puts();
+r = await F.sy.syncAll();
+check(r.readOnly.includes('inv') && puts() === putsBefore18, '(setup: synced view only, nothing sent)');
+check(F.S.counts.local.history.some((h) => h.id === waiting) && F.st.dirty('counts'), 'the count saved on the phone is kept, waiting to go');
+check(F.S.counts.local.history.some((h) => h.id === sharedSince), 'it still gets everyone else’s new counts');
+check(lineIn(F.S.inv.local, L2.id).par === 12, 'where both changed the same thing, GitHub’s version wins, so sending later can’t undo it');
+readOnly.delete('tok-f');
+r = await F.sy.syncAll();
+check(!r.errors.length && readJSON(SHARED, 'counts.json').history.some((h) => h.id === waiting) && lineIn(readJSON(SHARED, 'inventory.json'), L2.id).par === 12, 'write access back → the waiting count goes to GitHub, and the 12 stays');
+
+console.log('\n19. The shared repo is made public by mistake');
+GH.repos[SHARED].priv = false;
+E.S.count.counts[L1.products[0].id] = 1; E.act('count-save');
+const pending = newest(E).id;
+const putsBefore19 = puts();
+r = await E.sy.syncAll(); await wait(700);
+check(r.errors.some((e) => /public/.test(e.message)), 'sync says the repo is public: ' + ((r.errors[0] && r.errors[0].message) || 'no message'));
+check(puts() === putsBefore19 && !readJSON(SHARED, 'counts.json').history.some((h) => h.id === pending), 'nothing is sent to a public repo');
+check(E.S.counts.local.history.some((h) => h.id === pending), 'the count waits on the phone');
+GH.repos[SHARED].priv = true;
+r = await E.sy.syncAll();
+check(!r.errors.length && readJSON(SHARED, 'counts.json').history.some((h) => h.id === pending), 'private again → it goes');
 
 T.done();

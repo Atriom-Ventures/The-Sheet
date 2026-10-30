@@ -23,6 +23,10 @@ Access is managed on GitHub, not in the app. Each part of the app lives in its o
 
 Every sync asks GitHub what the key may do with each repo. Write: normal. Read: the part loads but nothing is sent, and the Count screens go view-only. No access (removed from the team, or the key revoked or expired): that part stops syncing and says so. What's already on a phone stays there; removing access stops future syncing, it can't wipe a phone.
 
+If a phone has unsent changes when its access drops to view only (say a count saved offline), they stay on the phone, unsent, and go up if write access comes back. Where someone else changed the same thing meanwhile, GitHub's version wins, so the late send can't undo it.
+
+The data repos must stay private. If one is made public on GitHub, phones keep reading it but send nothing to it, and the sync status says why; changes wait on the phone until it's private again.
+
 Synced files are tied to the repo's id, so renaming the repo or the organization doesn't restart anything. On a phone's first sync with a repo (a new phone, a restored backup), GitHub's copy wins any differences and anything only the phone has is added.
 
 Adding a new part means a new repo, a new connection in `js/sync.js` and its screens; access to it then works the same way.
@@ -51,10 +55,20 @@ Still to do: a pass with TalkBack (Android) and VoiceOver (iPhone); the printed 
 - Works offline after the first load (service worker). Data lives in IndexedDB on the phone.
 - Syncs when you tap Sync, and quietly on its own when the app opens, comes back to the front or regains signal, after a count is saved, and about 20 seconds after an item edit.
 - Merges three ways (last-synced copy, phone, GitHub), item by item. Saved counts are new records, so two people's counts never collide. Bookkeeping fields (`updated`, `by`) never count as a clash.
-- If two phones change the same inventory field between syncs, the phone's value stays and a "Keep mine / Use theirs" prompt appears on the Count tab. For the book, the phone wins and a merge note is kept under More → Sync.
+- Saving a count or editing an item while a sync is sending is safe: the change stays on the phone and goes up in a quiet sync right after.
+- If two phones change the same inventory field between syncs, the phone's value stays and a "Keep mine / Use theirs" prompt appears on the Count tab. Once that value changes again (someone settles on something newer), the prompt goes away, so an old prompt can't undo a newer change. For the book, the phone wins and a merge note is kept under More → Sync.
+- Everything from the shared files is shown as text, never as page markup, since anyone with access can edit them (even by hand on github.com).
 - Saved counts with something to order carry a status: not placed → placed → received, with initials and dates, so two people never place the same order. An unplaced order is replaced when anyone saves a newer count with its own order.
 
+## Ordering
+
+Anything counted below its minimum goes on the order with a suggested amount: what's short, in the line's unit, or in cases when the product to order has a per-case number. An amount changed by hand stays until the count is saved, but it belongs to the unit it was shown in: if the unit changes (a per-case number is added, or a different product is picked to order), the suggestion comes back rather than reading the old number in the new unit. Emptying an order box also brings the suggestion back; 0 means don't order it.
+
+## Printing
+
 Prints a revision stamp on every page and keeps a log of where printed copies went, so stale copies are easy to spot.
+
+## Building
 
 Internal names stay as they were (the IndexedDB name `multitool`, backup type `multitool-backup`, private-file type `multitool-private`) so older backup files still import.
 

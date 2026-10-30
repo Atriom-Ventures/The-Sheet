@@ -1,14 +1,51 @@
-// Sync with the private GitHub repo through the GitHub API, using a fine-grained key
-// that can only read and write that one repo. Runs only when you tap Sync and have a connection.
+// Sync with private GitHub repos through the GitHub API, using fine-grained keys that can only
+// read and write one repo each. There are two connections:
+//   book: book.json and state.json (one person's book, follow-ups and logs)
+//   inv:  inventory.json and counts.json (shared between the people who count and order)
+// If no inventory connection is set, inventory and counts sync to the book repo, as before.
+// Sync runs when you tap Sync, and quietly on its own when the app opens or a count is saved.
 
-import { S, save, flush } from './state.js';
+import { S, save, flush, migrateHistory, whoAmI, SYNCED, dirty, hasBook, hasInv } from './state.js';
 import { mergeDoc } from './merge.js';
 import { clone, same } from './util.js';
 
 const API = 'https://api.github.com';
-export const FILES = { book: 'book.json', inv: 'inventory.json', state: 'state.json' };
+export const FILES = { book: 'book.json', state: 'state.json', inv: 'inventory.json', counts: 'counts.json' };
+const INV_KEYS = ['inv', 'counts'];
 
-export const configured = () => !!(S.settings.owner && S.settings.repo && S.settings.token);
+/* ---------- connections ---------- */
+export function conn(which) {
+  const s = S.settings;
+  if (which === 'inv') return { owner: s.invOwner, repo: s.invRepo, token: s.invToken, branch: s.invBranch || 'main' };
+  return { owner: s.owner, repo: s.repo, token: s.token, branch: s.branch || 'main' };
+}
+const ok = (c) => !!(c && c.owner && c.repo && c.token);
+export const bookConfigured = () => ok(conn('book'));
+export const invConfigured = () => ok(conn('inv'));
+export const configured = () => bookConfigured() || invConfigured();
+/* full: the whole app (a book is loaded or connected). inv: count and order only. none: not set up. */
+export function appMode() {
+  if (bookConfigured() || hasBook()) return 'full';
+  if (invConfigured() || hasInv()) return 'inv';
+  return 'none';
+}
+/* An iPhone running the app in a Safari tab instead of from the home screen. Data there is
+   separate from the installed app's and Safari may clear it, so setup belongs in the installed app. */
+export function iosBrowserTab() {
+  const ua = navigator.userAgent || '';
+  const ios = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!ios) return false;
+  const standalone = navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  return !standalone;
+}
+const repoId = (c) => (String(c.owner) + '/' + String(c.repo)).toLowerCase();
+export const repoLabel = (c) => c.owner + '/' + c.repo;
+
+/* Which connection a synced file goes to right now, or null if none. */
+export function target(key) {
+  if (INV_KEYS.includes(key)) return invConfigured() ? conn('inv') : (bookConfigured() ? conn('book') : null);
+  return bookConfigured() ? conn('book') : null;
+}
 
 function b64encode(str) {
   const bytes = new TextEncoder().encode(str);
@@ -23,10 +60,9 @@ function b64decode(b64) {
   return new TextDecoder().decode(bytes);
 }
 
-class SyncError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
+export class SyncError extends Error { constructor(msg, status) { super(msg); this.status = status; } }
 
-async function gh(method, path, body, cfg) {
-  const c = cfg || S.settings;
+async function gh(method, path, body, c) {
   let res;
   try {
     res = await fetch(API + '/repos/' + encodeURIComponent(c.owner) + '/' + encodeURIComponent(c.repo) + path, {
@@ -36,58 +72,86 @@ async function gh(method, path, body, cfg) {
       body: body ? JSON.stringify(body) : undefined
     });
   } catch (e) {
-    throw new SyncError(navigator.onLine === false ? 'No connection. Everything is saved on this phone; sync when you’re back online.' : 'Couldn’t reach GitHub. Check the connection and try again.', 0);
+    throw new SyncError(navigator.onLine === false ? 'No connection. Everything is saved on this phone; it syncs when you’re back online.' : 'Couldn’t reach GitHub. Check the connection and try again.', 0);
   }
-  if (res.status === 401) throw new SyncError('GitHub didn’t accept the key. It may have expired. Make a new one and paste it in More → Sync.', 401);
+  if (res.status === 401) throw new SyncError('GitHub didn’t accept the key for ' + repoLabel(c) + '. It may have expired. Make a new one and paste it in More → Sync.', 401);
   if (res.status === 403) {
     const left = res.headers.get('x-ratelimit-remaining');
-    throw new SyncError(left === '0' ? 'GitHub says to slow down. Try again in a few minutes.' : 'The key works but isn’t allowed to do this. It needs Contents: read and write on the book repo.', 403);
+    throw new SyncError(left === '0' ? 'GitHub says to slow down. Try again in a few minutes.' : 'The key for ' + repoLabel(c) + ' works but isn’t allowed to do this. It needs Contents: read and write on that repo. If the repo belongs to an organization, its owner may still need to approve the key.', 403);
   }
   return res;
 }
 
-async function getFile(path) {
-  const res = await gh('GET', '/contents/' + path + '?ref=' + encodeURIComponent(S.settings.branch || 'main'));
-  if (res.status === 404) return null;
+async function getFile(path, c) {
+  const res = await gh('GET', '/contents/' + path + '?ref=' + encodeURIComponent(c.branch || 'main'), null, c);
+  if (res.status === 404) {
+    // 404 means either "no such file yet" or "can't see the repo". Tell them apart.
+    const repo = await gh('GET', '', null, c);
+    if (repo.status === 404) throw new SyncError('Can’t see ' + repoLabel(c) + '. Check the name, and that the key was made for that repo (for an organization’s repo, pick the organization as the key’s owner).', 404);
+    return null;
+  }
+  if (res.status === 409) return null; // empty repo with no commits yet
   if (!res.ok) throw new SyncError('GitHub error ' + res.status + ' reading ' + path + '.', res.status);
   const j = await res.json();
   let text;
   if (j.content && j.encoding === 'base64') text = b64decode(j.content);
   else {
     // Files over 1 MB come back without content; fetch the raw blob.
-    const raw = await gh('GET', '/git/blobs/' + j.sha);
+    const raw = await gh('GET', '/git/blobs/' + j.sha, null, c);
     if (!raw.ok) throw new SyncError('Couldn’t read ' + path + ' (' + raw.status + ').', raw.status);
     const rj = await raw.json(); text = b64decode(rj.content);
   }
   try { return { sha: j.sha, json: JSON.parse(text) }; } catch (e) { throw new SyncError(path + ' on GitHub isn’t valid JSON, so it wasn’t loaded. Fix it there and sync again.', 0); }
 }
 
-async function putFile(path, json, sha, message) {
-  const body = { message, content: b64encode(JSON.stringify(json, null, 1) + '\n'), branch: S.settings.branch || 'main' };
+async function putFile(path, json, sha, message, c) {
+  const body = { message, content: b64encode(JSON.stringify(json, null, 1) + '\n'), branch: c.branch || 'main' };
   if (sha) body.sha = sha;
-  const res = await gh('PUT', '/contents/' + path, body);
+  const res = await gh('PUT', '/contents/' + path, body, c);
   if (res.status === 409 || res.status === 422) return { conflict: true };
   if (!res.ok) throw new SyncError('GitHub error ' + res.status + ' saving ' + path + '.', res.status);
   const j = await res.json();
   return { sha: j.content && j.content.sha };
 }
 
+/* Find the object with this id anywhere in a document (for "who changed it"). */
+function findById(node, id) {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) { for (const x of node) { const f = findById(x, id); if (f) return f; } return null; }
+  if (node.id === id) return node;
+  for (const k of Object.keys(node)) { const f = findById(node[k], id); if (f) return f; }
+  return null;
+}
+function whoChanged(doc, path) {
+  const ids = (path.match(/\[([^\]]+)\]/g) || []).map((x) => x.slice(1, -1));
+  for (let i = ids.length - 1; i >= 0; i--) { const o = findById(doc, ids[i]); if (o && o.by) return String(o.by); }
+  return '';
+}
+
 /* One file: pull, merge, push if this phone has anything new. */
 async function syncOne(key, report, attempt = 0) {
+  const c = target(key);
+  if (!c) return;
   const path = FILES[key];
   const slot = S[key];
-  const remote = await getFile(path);
+  const rid = repoId(c);
+  // Older versions didn't record which repo a file came from; it was always the book repo.
+  if (slot.src == null && slot.sha && bookConfigured()) slot.src = repoId(conn('book'));
+  if (slot.src !== rid) { slot.base = null; slot.sha = null; slot.src = rid; }
+  const remote = await getFile(path, c);
+  const who = whoAmI();
+  const msg = (verb) => verb + ' ' + path + (who ? ' (' + who + ')' : '');
   if (!remote) {
     if (slot.local) {
-      const r = await putFile(path, slot.local, null, 'Add ' + path + ' from phone');
+      const r = await putFile(path, slot.local, null, msg('Add'), c);
       if (r.conflict) { if (attempt < 1) return syncOne(key, report, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
-      slot.base = clone(slot.local); slot.sha = r.sha; slot.syncedAt = new Date().toISOString(); report.pushed.push(path);
+      slot.base = clone(slot.local); slot.sha = r.sha; slot.syncedAt = new Date().toISOString(); report.pushed.push(key);
     }
     return;
   }
   if (!slot.local) {
     slot.local = clone(remote.json); slot.base = clone(remote.json); slot.sha = remote.sha; slot.syncedAt = new Date().toISOString();
-    report.pulled.push(path); return;
+    report.pulled.push(key); return;
   }
   const localChanged = !same(slot.local, slot.base);
   if (remote.sha === slot.sha && !localChanged) { slot.syncedAt = new Date().toISOString(); return; }
@@ -95,31 +159,42 @@ async function syncOne(key, report, attempt = 0) {
   if (remote.sha !== slot.sha) {
     const m = mergeDoc(slot.base, slot.local, remote.json);
     next = m.doc; conflicts = m.conflicts;
-    if (!same(remote.json, slot.base)) report.pulled.push(path);
+    if (!same(remote.json, slot.base)) report.pulled.push(key);
   }
   if (same(next, remote.json)) {
     slot.local = clone(remote.json); slot.base = clone(remote.json); slot.sha = remote.sha;
   } else {
-    const r = await putFile(path, next, remote.sha, 'Update ' + path + ' from phone');
+    const r = await putFile(path, next, remote.sha, msg('Update'), c);
     if (r.conflict) { if (attempt < 1) return syncOne(key, report, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
-    slot.local = clone(next); slot.base = clone(next); slot.sha = r.sha; report.pushed.push(path);
+    slot.local = clone(next); slot.base = clone(next); slot.sha = r.sha; report.pushed.push(key);
   }
   slot.syncedAt = new Date().toISOString();
   if (conflicts.length) {
     report.conflicts += conflicts.length;
-    S.conflicts = (S.conflicts || []).concat(conflicts.map((c) => Object.assign({ file: path, at: new Date().toISOString() }, c))).slice(-50);
+    const review = INV_KEYS.includes(key);
+    if (review) report.review += conflicts.length;
+    const at = new Date().toISOString();
+    S.conflicts = (S.conflicts || []).concat(conflicts.map((cf) => Object.assign({ id: 'cf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), key, file: path, at, review, who: whoChanged(remote.json, cf.path) }, cf))).slice(-50);
     save('conflicts');
   }
 }
 
 let running = null;
+/* Sync every file that has a connection. One file failing doesn't stop the others. */
 export function syncAll() {
   if (running) return running;
   running = (async () => {
-    const report = { pulled: [], pushed: [], conflicts: 0 };
+    const report = { pulled: [], pushed: [], conflicts: 0, review: 0, errors: [] };
     try {
-      for (const key of Object.keys(FILES)) { await syncOne(key, report); save(key); }
-      S.settings.lastSync = new Date().toISOString(); save('settings');
+      for (const key of Object.keys(FILES)) {
+        try { await syncOne(key, report); }
+        catch (e) { if (!report.errors.some((x) => x.message === e.message)) report.errors.push(e); }
+        save(key);
+      }
+      if (migrateHistory()) { try { await syncOne('state', report); await syncOne('counts', report); } catch (e) { report.errors.push(e); } }
+      if (!report.errors.length) { S.settings.lastSync = new Date().toISOString(); S.settings.lastSyncError = ''; }
+      else S.settings.lastSyncError = report.errors[0].message || 'Sync didn’t finish.';
+      save('settings');
       await flush();
       return report;
     } finally { running = null; }
@@ -128,11 +203,31 @@ export function syncAll() {
 }
 export const isSyncing = () => !!running;
 
+/* Quiet sync: when the app opens, comes back to the front, regains signal, or after a save.
+   Skips when offline or not connected. Never shows a toast; problems show on the status chip. */
+let lastAuto = 0, autoTimer = null;
+const autoListeners = [];
+export const onAutoSync = (fn) => { autoListeners.push(fn); };
+export function autoSync(reason, delay = 0) {
+  clearTimeout(autoTimer);
+  autoTimer = setTimeout(async () => {
+    if (!configured() || navigator.onLine === false) return;
+    if (running) { if (reason === 'save') running.finally(() => autoSync('save', 1000)); return; }
+    const nowT = Date.now();
+    if (reason === 'open' && nowT - lastAuto < 2 * 60 * 1000 && !SYNCED.some(dirty)) return;
+    if (reason === 'online' && !SYNCED.some(dirty)) return;
+    lastAuto = nowT;
+    let report = null;
+    try { report = await syncAll(); } catch (e) { console.warn(e); }
+    autoListeners.forEach((fn) => { try { fn(report, reason); } catch (e) { console.error(e); } });
+  }, delay);
+}
+
 /* Check a key before saving it: is the repo reachable, private, and writable? */
 export async function testConnection(cfg) {
   const res = await gh('GET', '', null, cfg);
-  if (res.status === 404) throw new SyncError('Repo not found. Check the owner and repo name, and that the key includes that repo.', 404);
+  if (res.status === 404) throw new SyncError('Repo not found. Check the owner and repo name, and that the key includes that repo. For an organization’s repo, the key’s owner has to be the organization.', 404);
   if (!res.ok) throw new SyncError('GitHub error ' + res.status + '.', res.status);
   const j = await res.json();
-  return { private: !!j.private, push: !!(j.permissions && j.permissions.push), fullName: j.full_name, defaultBranch: j.default_branch };
+  return { private: !!j.private, push: !!(j.permissions && j.permissions.push), fullName: j.full_name, defaultBranch: j.default_branch || 'main' };
 }

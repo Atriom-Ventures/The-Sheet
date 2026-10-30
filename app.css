@@ -535,3 +535,31 @@ body.quick .view{padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px))}
   .pv-small{font-size:8.5pt;color:#555}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+
+/* ---------- 1.1: shared inventory ---------- */
+.dot.bad{background:var(--stop)}
+.banner.static{cursor:default;margin:8px 0 12px}
+.conns{display:grid;gap:0;margin-top:12px;border-top:1px solid var(--line)}
+.conn-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.conn-row .hint{margin:2px 0 0;overflow-wrap:anywhere}
+.conn-row .mono{font-family:var(--f-mono);font-size:13.5px}
+/* An order someone saved or placed, at the top of the Order tab, so nobody orders twice. */
+.ord-open{border:1px solid var(--line);border-left:5px solid var(--lamp);background:var(--surface);border-radius:12px;padding:12px 14px;margin:0 0 12px}
+.ord-open.s-placed{border-left-color:var(--go)}
+.ord-open-h{display:grid;gap:2px}
+.ord-open-h b{font-size:16px}
+.ord-open-h span{color:var(--muted);font-size:14px}
+.ord-open-h .ord-st{color:var(--ink);font-weight:700}
+.ord-open .row-actions{margin-top:10px}
+.otag{grid-column:1/-1;justify-self:start;font-family:var(--f-mono);font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:4px;margin-top:4px;white-space:nowrap}
+.o-warn{background:var(--lamp-soft);color:var(--lamp)} .o-go{background:var(--go-soft);color:var(--go)} .o-ok{background:var(--none-soft);color:var(--none)} .o-muted{background:transparent;color:var(--muted);border:1px dashed var(--line-strong)}
+/* Clashes: both phones changed the same thing between syncs. */
+.clash{border:1px solid var(--marker);background:var(--marker-soft);border-radius:14px;padding:4px 14px 12px;margin:0 0 14px}
+.clash-h{display:flex;align-items:center;gap:8px;margin:10px 0 2px;font-family:var(--f-display);font-weight:800;font-size:21px;letter-spacing:.04em;text-transform:uppercase}
+.clash-h svg.i{width:20px;height:20px}
+.clash .hint{margin:4px 0 6px}
+.clash-i{border-top:1px solid var(--line);padding:10px 0 2px}
+.clash-t{font-weight:700}
+.clash-v{font-size:14.5px;color:var(--muted);overflow-wrap:anywhere}
+.clash-v b{color:var(--ink)}
+.clash-i .row-actions{margin-top:8px}

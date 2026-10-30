@@ -1,64 +1,101 @@
 // More: sync with the private repo, backups, imports, phone settings, links, and erase.
 
 import { app } from '../app.js';
-import { S, B, save, flush, eraseAll, dirty, anyDirty, hasBook, hasInv, SYNCED } from '../state.js';
+import { S, B, save, flush, eraseAll, dirty, anyDirty, hasBook, hasInv, SYNCED, migrateHistory, whoAmI } from '../state.js';
 import { esc, ago, todayKey, downloadFile, shareFile, pickFile, clone, $ } from '../util.js';
 import { ICON, empty, toast, armed, field, input, opts } from '../ui.js';
-import { syncAll, testConnection, configured, isSyncing, FILES } from '../sync.js';
+import { syncAll, testConnection, configured, isSyncing, FILES, conn, bookConfigured, invConfigured, repoLabel, appMode, iosBrowserTab } from '../sync.js';
 import { persist, persisted } from '../db.js';
 
-let lastResult = null, persistState = null, showConn = false;
-const NAMES = { book: 'Book', inv: 'Inventory', state: 'Follow-ups, wins, saved counts' };
+let lastResult = null, persistState = null, showConn = null, setupKind = null;
+const NAMES = { book: 'Book', state: 'Follow-ups and logs', inv: 'Inventory items', counts: 'Saved counts and orders' };
+
+function iosWarning() {
+  if (!iosBrowserTab()) return '';
+  return '<div class="banner warn static"><strong>Add MultiTool to your Home Screen first.</strong>In Safari, tap Share, then Add to Home Screen. Open it from the new icon and set up there. Anything set up in this Safari tab stays here and won’t carry over.</div>';
+}
+
+function connRow(which) {
+  const c = conn(which), on = which === 'inv' ? invConfigured() : bookConfigured();
+  const label = which === 'inv' ? 'Inventory' : 'Book';
+  let v;
+  if (on) v = '<span class="mono">' + esc(repoLabel(c)) + '</span>';
+  else if (which === 'inv' && bookConfigured()) v = 'Using the book repo. Connect a shared repo so others can count and order with you.';
+  else v = 'Not connected';
+  const btnLabel = on ? 'Change' : (which === 'inv' ? 'Connect shared repo' : 'Connect');
+  return '<div class="conn-row"><div><b>' + label + '</b><div class="hint">' + v + '</div></div><button class="btn small ghost" data-act="conn-toggle" data-which="' + which + '">' + ICON.key + ' ' + btnLabel + '</button></div>';
+}
+
+function setupCard() {
+  let h = '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.sync + ' Set up</h2></div>' + iosWarning();
+  h += '<p>What is this phone for?</p><div class="chips" role="group">' +
+    '<button class="chip" data-act="setup-kind" data-id="inv" aria-pressed="' + (setupKind === 'inv') + '">Counting and ordering</button>' +
+    '<button class="chip" data-act="setup-kind" data-id="book" aria-pressed="' + (setupKind === 'book') + '">My full book</button></div>';
+  if (setupKind === 'inv') h += '<p class="hint">You’ll get the Count tab: the order sheet, saved counts and order status, shared with everyone else who orders. Ask whoever set it up for the repo name.</p>' + connForm('inv', true) + keyHelp('inv');
+  else if (setupKind === 'book') h += '<p class="hint">Connect your private book repo to load the book and inventory, and to back up your edits.</p>' + connForm('book', true) + keyHelp('book');
+  return h + '</section>';
+}
 
 function syncCard() {
-  let h = '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.sync + ' Sync</h2></div>';
-  if (!configured()) {
-    h += '<p>Connect your private book repo to load the book and inventory, and to back up your edits. You only need a connection when you sync.</p>' + connForm(true) + keyHelp();
-    return h + '</section>';
-  }
+  if (!configured()) return setupCard();
+  let h = '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.sync + ' Sync</h2></div>' + iosWarning();
   const waiting = SYNCED.filter(dirty);
   h += '<p class="sync-status">' + (S.settings.lastSync ? 'Last synced ' + esc(ago(S.settings.lastSync)) : 'Not synced yet') + '. ' + (waiting.length ? '<b>Changes waiting:</b> ' + esc(waiting.map((k) => NAMES[k]).join(', ')) + '.' : 'Nothing waiting.') + '</p>';
   if (lastResult) h += '<p class="note">' + esc(lastResult) + '</p>';
-  h += '<div class="row-actions"><button class="btn primary big" data-act="sync-now"' + (isSyncing() ? ' disabled' : '') + '>' + ICON.sync + (isSyncing() ? ' Syncing…' : ' Sync now') + '</button><button class="btn ghost" data-act="conn-toggle">' + ICON.key + ' Connection</button></div>';
-  if ((S.conflicts || []).length) {
-    h += '<details class="hist"><summary><span class="hdate">' + S.conflicts.length + ' merge note' + (S.conflicts.length === 1 ? '' : 's') + '</span><span class="hsum">The same thing changed on the phone and on GitHub. The phone’s version was kept.</span></summary><div class="hbody"><ul class="plain-list">' +
-      S.conflicts.slice().reverse().map((c) => '<li><b>' + esc(c.file) + '</b> ' + esc(c.path.replace(/^\./, '')) + (c.note ? ' · ' + esc(c.note) : '') + ' · ' + esc(ago(c.at)) + '</li>').join('') + '</ul><button class="btn small ghost" data-act="conflicts-clear">Clear notes</button></div></details>';
+  else if (S.settings.lastSyncError) h += '<p class="note warn-t">Last sync didn’t finish: ' + esc(S.settings.lastSyncError) + '</p>';
+  h += '<p class="hint">It also syncs on its own when the app opens and after you save a count, whenever there’s signal.</p>';
+  h += '<div class="row-actions"><button class="btn primary big" data-act="sync-now"' + (isSyncing() ? ' disabled' : '') + '>' + ICON.sync + (isSyncing() ? ' Syncing…' : ' Sync now') + '</button></div>';
+  const mode = appMode();
+  h += '<div class="conns">' + (mode === 'full' ? connRow('book') : '') + connRow('inv') + '</div>';
+  if (showConn) h += connForm(showConn, false) + keyHelp(showConn);
+  const notes = (S.conflicts || []).filter((c) => !c.review);
+  if (notes.length) {
+    h += '<details class="hist"><summary><span class="hdate">' + notes.length + ' merge note' + (notes.length === 1 ? '' : 's') + '</span><span class="hsum">The same thing changed on the phone and on GitHub. The phone’s version was kept.</span></summary><div class="hbody"><ul class="plain-list">' +
+      notes.slice().reverse().map((c) => '<li><b>' + esc(c.file) + '</b> ' + esc(c.path.replace(/^\./, '')) + (c.note ? ' · ' + esc(c.note) : '') + ' · ' + esc(ago(c.at)) + '</li>').join('') + '</ul><button class="btn small ghost" data-act="conflicts-clear">Clear notes</button></div></details>';
   }
-  if (showConn) h += connForm(false) + keyHelp();
+  if ((S.conflicts || []).some((c) => c.review)) h += '<p class="note"><button class="link inline" data-act="go" data-id="#count">Inventory changes clashed. Review them on the Count tab.</button></p>';
   return h + '</section>';
 }
-function connForm(first) {
-  const s = S.settings;
-  return '<div class="form conn">' +
-    field('cf-owner', 'GitHub owner', input('cf-owner', s.owner, 'autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="your-username"'), '', 'half') +
-    field('cf-repo', 'Book repo', input('cf-repo', s.repo, 'autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="my-book"'), 'Must be private', 'half') +
-    field('cf-token', 'Key (fine-grained token)', '<input id="cf-token" type="password" autocomplete="off" spellcheck="false" placeholder="' + (s.token ? 'Saved. Paste a new one to replace it.' : 'github_pat_…') + '">', 'Stays on this phone. It’s left out of backups.') +
-    '<div class="row-actions full"><button class="btn primary" data-act="conn-save">' + (first ? 'Connect and sync' : 'Test and save') + '</button>' + (!first ? '<button class="btn danger" data-act="conn-forget">Disconnect</button>' : '') + '</div></div>';
+
+function connForm(which, first) {
+  const c = conn(which), inv = which === 'inv';
+  const repoVal = c.owner && c.repo ? c.owner + '/' + c.repo : '';
+  let h = '<div class="form conn" data-which="' + which + '">';
+  h += field('cf-repo-' + which, inv ? 'Inventory repo' : 'Book repo', input('cf-repo-' + which, repoVal, 'autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="owner/repo-name"'), inv ? 'Like team-name/inventory. A github.com link works too.' : 'Your username, a slash, and the repo name. Must be private.');
+  h += field('cf-token-' + which, 'Key (fine-grained token)', '<input id="cf-token-' + which + '" type="password" autocomplete="off" spellcheck="false" placeholder="' + (c.token ? 'Saved. Paste a new one to replace it.' : 'github_pat_…') + '">', 'Stays on this phone. It’s left out of backups.');
+  if (first && inv) h += field('cf-init', 'Your initials', input('cf-init', S.settings.initials || '', 'data-setting="initials" autocomplete="off" autocapitalize="characters" maxlength="3" placeholder="AB"'), 'Goes on your counts so others know who counted.', 'half');
+  h += '<div class="row-actions full"><button class="btn primary" data-act="conn-save" data-which="' + which + '">' + (first ? 'Connect and sync' : 'Test and save') + '</button>' + (!first && (inv ? invConfigured() : bookConfigured()) ? '<button class="btn danger" data-act="conn-forget" data-which="' + which + '">Disconnect</button>' : '') + '</div></div>';
+  return h;
 }
-function keyHelp() {
+function keyHelp(which) {
+  const inv = which === 'inv';
   return '<details class="todo-list"><summary>How to make the key</summary><ol class="help-steps">' +
-    '<li>On github.com, open <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens</b>, and tap <b>Generate new token</b>.</li>' +
+    '<li>On github.com, open your picture → <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens</b>, and tap <b>Generate new token</b>.</li>' +
     '<li>Name it “MultiTool phone”. Set an expiration you’re comfortable with (a year is fine; you’ll paste a new one when it runs out).</li>' +
-    '<li><b>Repository access:</b> Only select repositories → your book repo. Nothing else.</li>' +
+    (inv ? '<li><b>Resource owner:</b> pick the organization that owns the inventory repo, not your own account. If it isn’t listed, ask to be added to the organization first.</li>' : '') +
+    '<li><b>Repository access:</b> Only select repositories → ' + (inv ? 'the inventory repo' : 'your book repo') + '. Nothing else.</li>' +
     '<li><b>Permissions → Repository permissions → Contents:</b> Read and write. Leave everything else as it is.</li>' +
-    '<li>Generate, copy the token, and paste it above.</li></ol><p class="hint">That key can only touch the one repo. If the phone is ever lost, delete the token on GitHub and it stops working.</p></details>';
+    '<li>Generate, copy the token, and paste it above.</li></ol><p class="hint">That key can only touch the one repo. If the phone is ever lost, delete the token on GitHub and it stops working.' + (inv ? ' If the organization asks for approval, its owner approves the key before it works.' : '') + '</p></details>';
 }
 
 function backupCard() {
+  const inv = appMode() === 'inv';
   return '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.download + ' Backup</h2></div>' +
-    '<p>A backup file holds everything on this phone, including phone-only things like shift notes, the floor board and trainees. The GitHub key is left out.</p>' +
+    (inv ? '<p>Saved counts and items are already kept in the shared repo. A backup file also holds the count in progress. The GitHub key is left out.</p>'
+      : '<p>A backup file holds everything on this phone, including phone-only things like shift notes, the floor board and trainees. The GitHub keys are left out.</p>') +
     '<p class="hint">Last backup file: ' + esc(S.settings.lastExport ? ago(S.settings.lastExport) : 'never') + '.</p>' +
     '<div class="row-actions"><button class="btn" data-act="backup-share">' + ICON.share + ' Save backup</button><button class="btn ghost" data-act="import">' + ICON.upload + ' Import a file</button></div>' +
-    '<p class="hint">Import takes a backup file, the phone-only staffing plan file, or a book or inventory file.</p></section>';
+    (inv ? '' : '<p class="hint">Import takes a backup file, the phone-only staffing plan file, or a book or inventory file.</p>') + '</section>';
 }
 function phoneCard() {
-  const s = S.settings;
-  const ps = persistState == null ? 'Checking…' : persistState ? 'Protected: Chrome won’t clear it to save space.' : 'Not protected yet. Installing the app to your home screen usually fixes that.';
+  const s = S.settings, full = appMode() === 'full';
+  const ps = persistState == null ? 'Checking…' : persistState ? 'Protected: the phone won’t clear it to save space.' : 'Not protected yet. Installing the app to your home screen usually fixes that.';
   return '<section class="panel"><div class="row-h"><h2 class="sec-h">This phone</h2></div><div class="form">' +
-    field('st-name', 'Sign messages as', input('st-name', s.name, 'data-setting="name" autocomplete="name" placeholder="Your name"')) +
+    field('st-name', 'Sign messages as', input('st-name', s.name, 'data-setting="name" autocomplete="name" placeholder="Your name"'), '', 'half') +
+    field('st-init', 'Initials', input('st-init', s.initials || '', 'data-setting="initials" autocomplete="off" autocapitalize="characters" maxlength="3" placeholder="' + esc(whoAmI() || 'AB') + '"'), 'On counts and item changes', 'half') +
     field('st-theme', 'Look', '<select id="st-theme" data-setting="theme">' + opts([['auto', 'Match the phone'], ['light', 'Light'], ['dark', 'Dark']], s.theme) + '</select>', '', 'half') +
-    field('st-quick', 'Small screens', '<select id="st-quick" data-setting="quick">' + opts([['true', 'Open to the quick view'], ['false', 'Normal view']], String(s.quick !== false)) + '</select>', 'Like the Flip’s cover screen', 'half') +
-    '</div><p class="hint">Storage: ' + esc(ps) + '</p><div class="row-actions"><button class="btn small ghost" data-act="go" data-id="#quick">' + ICON.grid + ' Open quick view</button></div></section>';
+    (full ? field('st-quick', 'Small screens', '<select id="st-quick" data-setting="quick">' + opts([['true', 'Open to the quick view'], ['false', 'Normal view']], String(s.quick !== false)) + '</select>', 'Like the Flip’s cover screen', 'half') : '') +
+    '</div><p class="hint">Storage: ' + esc(ps) + '</p>' + (full ? '<div class="row-actions"><button class="btn small ghost" data-act="go" data-id="#quick">' + ICON.grid + ' Open quick view</button></div>' : '') + '</section>';
 }
 function linksCard() {
   const links = (B().links || []);
@@ -66,9 +103,11 @@ function linksCard() {
   return '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.link + ' Links</h2></div><ul class="plain-list links">' + links.map((l) => '<li><a href="' + esc(l.url) + '" target="_blank" rel="noopener">' + esc(l.label) + '</a></li>').join('') + '</ul><p class="hint">These open in the browser and need a connection.</p></section>';
 }
 function aboutCard() {
+  const full = appMode() !== 'inv';
   return '<section class="panel"><div class="row-h"><h2 class="sec-h">About</h2></div>' +
-    '<p>MultiTool ' + esc(app.version) + '. The app itself holds no work content. The book and inventory come from your private repo; everything else stays on this phone.</p>' +
-    '<ul class="plain-list"><li><b>Synced:</b> book, inventory, follow-ups, wins, printed log, saved counts.</li><li><b>Phone only:</b> today’s ticks, shift notes, floor board, trainees, message drafts, staffing plan, the key.</li></ul>' +
+    '<p>MultiTool ' + esc(app.version) + '. The app itself holds no work content. ' + (full ? 'The book comes from your private repo, and inventory from the shared inventory repo (or the book repo if there isn’t one); everything else stays on this phone.' : 'The inventory comes from the shared inventory repo; everything else stays on this phone.') + '</p>' +
+    (full ? '<ul class="plain-list"><li><b>Synced to the book repo:</b> book, follow-ups, wins, printed log.</li><li><b>Synced to the inventory repo:</b> inventory items, saved counts, order status.</li><li><b>Phone only:</b> today’s ticks, shift notes, floor board, trainees, message drafts, staffing plan, the count in progress, the keys.</li></ul>'
+      : '<ul class="plain-list"><li><b>Shared:</b> inventory items, saved counts, order status, with your initials.</li><li><b>Phone only:</b> the count in progress and the key.</li></ul>') +
     '<div class="row-actions"><button class="btn small ghost" data-act="check-update">Check for an app update</button><button class="btn small danger" data-act="erase">' + ICON.trash + ' Erase this phone’s data</button></div></section>';
 }
 
@@ -80,8 +119,8 @@ export function render() {
 /* ---------- backup and import ---------- */
 function backupJSON() {
   const data = {};
-  ['book', 'inv', 'state', 'count', 'day', 'shift', 'floor', 'trainees', 'priv', 'msgs', 'settings', 'conflicts'].forEach((k) => { data[k] = clone(S[k]); });
-  delete data.settings.token;
+  ['book', 'inv', 'state', 'counts', 'count', 'day', 'shift', 'floor', 'trainees', 'priv', 'msgs', 'settings', 'conflicts'].forEach((k) => { data[k] = clone(S[k]); });
+  delete data.settings.token; delete data.settings.invToken;
   return JSON.stringify({ type: 'multitool-backup', schema: 1, exported: new Date().toISOString(), app: app.version, data }, null, 1);
 }
 async function importFile() {
@@ -96,10 +135,11 @@ async function importFile() {
   }
   if (j && j.type === 'multitool-backup' && j.data) {
     if (!confirm('Replace everything on this phone with the backup from ' + (j.exported || 'that file').slice(0, 10) + '?')) return;
-    const keep = { token: S.settings.token, owner: S.settings.owner, repo: S.settings.repo };
+    const keep = { token: S.settings.token, owner: S.settings.owner, repo: S.settings.repo, invToken: S.settings.invToken, invOwner: S.settings.invOwner, invRepo: S.settings.invRepo };
     Object.keys(j.data).forEach((k) => { if (k in S) { S[k] = j.data[k]; save(k); } });
-    S.settings = Object.assign({}, S.settings, { token: keep.token || '', owner: S.settings.owner || keep.owner, repo: S.settings.repo || keep.repo, setupDone: true });
-    save('settings'); await flush(); toast('Backup restored.'); app.go('#now'); return;
+    S.settings = Object.assign({}, S.settings, { token: keep.token || '', owner: S.settings.owner || keep.owner, repo: S.settings.repo || keep.repo, invToken: keep.invToken || '', invOwner: S.settings.invOwner || keep.invOwner || '', invRepo: S.settings.invRepo || keep.invRepo || '', setupDone: true });
+    migrateHistory();
+    save('settings'); await flush(); toast('Backup restored.'); app.go(appMode() === 'inv' ? '#count' : '#now'); return;
   }
   if (j && Array.isArray(j.lists) && Array.isArray(j.cards)) {
     if (hasBook() && !confirm('Replace the book on this phone with this file?')) return;
@@ -116,35 +156,50 @@ async function doSync() {
   lastResult = null; app.renderView();
   try {
     const r = await syncAll();
-    const parts = [], F = { 'book.json': 'the book', 'inventory.json': 'inventory', 'state.json': 'follow-ups and counts' };
+    const parts = [], F = { book: 'the book', state: 'follow-ups and logs', inv: 'inventory items', counts: 'saved counts' };
     const nice = (a) => a.map((f) => F[f] || f).join(', ');
     if (r.pulled.length) parts.push('got updates to ' + nice(r.pulled));
     if (r.pushed.length) parts.push('saved ' + nice(r.pushed) + ' to GitHub');
-    if (r.conflicts) parts.push(r.conflicts + ' merge note' + (r.conflicts === 1 ? '' : 's'));
+    if (r.review) parts.push(r.review + ' clash' + (r.review === 1 ? '' : 'es') + ' to review on the Count tab');
+    if (r.conflicts - r.review > 0) parts.push((r.conflicts - r.review) + ' merge note' + (r.conflicts - r.review === 1 ? '' : 's'));
     lastResult = parts.length ? 'Synced: ' + parts.join('; ') + '.' : 'Synced. Everything already matched.';
-    toast('Synced.');
+    if (r.errors.length) { lastResult = (parts.length ? lastResult + ' ' : '') + 'Didn’t finish: ' + r.errors.map((e) => e.message).join(' '); toast('Sync didn’t finish.'); }
+    else toast('Synced.');
   } catch (e) { lastResult = e.message || String(e); toast('Sync didn’t finish.'); }
   app.render();
 }
 
 export const acts = {
   'sync-now': () => doSync(),
-  'conn-toggle': () => { showConn = !showConn; app.renderView(); },
+  'setup-kind': (el) => { setupKind = el.dataset.id; app.renderView(); },
+  'conn-toggle': (el) => { const w = el.dataset.which || 'book'; showConn = showConn === w ? null : w; app.renderView(); },
   'conn-save': async (el) => {
-    const owner = $('#cf-owner').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\/.*$/, ''), repo = $('#cf-repo').value.trim().replace(/\.git$/, ''), tok = $('#cf-token').value.trim() || S.settings.token;
-    if (!owner || !repo || !tok) { toast('Fill in the owner, the repo and the key.'); return; }
+    const which = el.dataset.which || 'book', inv = which === 'inv';
+    const parsed = parseRepo($('#cf-repo-' + which).value);
+    const prevTok = inv ? S.settings.invToken : S.settings.token;
+    const tok = $('#cf-token-' + which).value.trim() || prevTok;
+    if (!parsed || !tok) { toast('Fill in the repo (owner/name) and the key.'); return; }
+    const label = el.textContent;
     el.disabled = true; el.textContent = 'Checking…';
     try {
-      const info = await testConnection({ owner, repo, token: tok });
-      if (!info.private) { toast('That repo is public. Make it private on GitHub first; the book shouldn’t be public.'); el.disabled = false; el.textContent = 'Test and save'; return; }
-      Object.assign(S.settings, { owner, repo, token: tok, branch: info.defaultBranch || 'main', setupDone: true }); save('settings');
-      showConn = false;
+      const info = await testConnection({ owner: parsed.owner, repo: parsed.repo, token: tok });
+      if (!info.private) { toast('That repo is public. Make it private on GitHub first; this shouldn’t be public.'); el.disabled = false; el.textContent = label; return; }
+      if (inv) Object.assign(S.settings, { invOwner: parsed.owner, invRepo: parsed.repo, invToken: tok, invBranch: info.defaultBranch, setupDone: true });
+      else Object.assign(S.settings, { owner: parsed.owner, repo: parsed.repo, token: tok, branch: info.defaultBranch, setupDone: true });
+      save('settings');
+      showConn = null; setupKind = null;
       toast(info.push ? 'Connected. Syncing…' : 'Connected, but GitHub didn’t confirm write access. Syncing…');
       await doSync();
       persist().then((v) => { persistState = !!v; });
-    } catch (e) { toast(e.message || 'Couldn’t connect.'); el.disabled = false; el.textContent = 'Test and save'; }
+      if (inv && appMode() === 'inv') app.go('#count');
+    } catch (e) { toast(e.message || 'Couldn’t connect.'); el.disabled = false; el.textContent = label; }
   },
-  'conn-forget': (el) => { if (!armed(el, 'Forget the key?')) return; S.settings.token = ''; save('settings'); showConn = false; toast('Key removed from this phone. Your data stays.'); app.renderView(); },
+  'conn-forget': (el) => {
+    if (!armed(el, 'Forget the key?')) return;
+    if (el.dataset.which === 'inv') { S.settings.invToken = ''; S.settings.invOwner = ''; S.settings.invRepo = ''; }
+    else S.settings.token = '';
+    save('settings'); showConn = null; toast('Key removed from this phone. Your data stays.'); app.render();
+  },
   'conflicts-clear': () => { S.conflicts = []; save('conflicts'); app.renderView(); },
   'backup-share': async () => { const name = 'multitool-backup-' + todayKey() + '.json'; const r = await shareFile(name, backupJSON()); if (r !== 'cancelled') { S.settings.lastExport = new Date().toISOString(); save('settings'); toast(r === 'shared' ? 'Backup shared.' : 'Backup saved to Downloads.'); app.renderView(); } },
   'import': () => importFile(),
@@ -155,9 +210,22 @@ export function onInput(el, ev) {
   if (!el.dataset.setting) return false;
   const k = el.dataset.setting;
   if (k === 'quick') S.settings.quick = el.value === 'true';
+  else if (k === 'initials') { S.settings.initials = el.value.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3); if (el.value !== S.settings.initials && ev.type === 'change') el.value = S.settings.initials; }
   else S.settings[k] = el.value;
   save('settings');
   if (k === 'theme') app.applyTheme();
   return true;
 }
-export function prefill(owner, repo) { if (owner && !S.settings.owner) S.settings.owner = owner; if (repo && !S.settings.repo) S.settings.repo = repo; save('settings'); }
+/* Accepts owner/repo, a github.com link, or a clone URL. */
+export function parseRepo(text) {
+  const t = String(text || '').trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/^git@github\.com:/i, '').replace(/\.git$/i, '').replace(/[?#].*$/, '');
+  const [owner, repo] = t.split('/').map((x) => (x || '').trim());
+  if (!owner || !repo || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) return null;
+  return { owner, repo };
+}
+/* From a setup link: #setup=owner/repo (book) or #setup=inv:owner/repo (inventory only). */
+export function prefill(owner, repo, which) {
+  if (which === 'inv') { if (owner && !S.settings.invOwner) S.settings.invOwner = owner; if (repo && !S.settings.invRepo) S.settings.invRepo = repo; setupKind = 'inv'; }
+  else { if (owner && !S.settings.owner) S.settings.owner = owner; if (repo && !S.settings.repo) S.settings.repo = repo; setupKind = 'book'; }
+  save('settings');
+}

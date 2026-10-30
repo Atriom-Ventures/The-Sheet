@@ -1,9 +1,12 @@
 // All app state, loaded from IndexedDB at start and saved back as it changes.
 //
-// Synced with the private repo (three files):
-//   book   -> book.json       checklists, cards, assignment sheet, the day
-//   inv    -> inventory.json  inventory lines and products
-//   state  -> state.json      follow-ups, wins, printed copies, saved counts
+// Synced through one or two private repos:
+//   Book connection:
+//     book   -> book.json       checklists, cards, assignment sheet, the day
+//     state  -> state.json      follow-ups, wins, printed copies
+//   Inventory connection (a shared repo; falls back to the book repo if none is set):
+//     inv    -> inventory.json  inventory lines and products
+//     counts -> counts.json     saved counts and their order status
 // Phone only, never synced:
 //   count (count in progress), day (today's ticks), shift (shift notes), floor (who's on, breaks),
 //   trainees, priv (staffing plan and private cards), msgs (message drafts), settings (incl. GitHub key)
@@ -11,17 +14,19 @@
 import * as db from './db.js';
 import { clone, same, todayKey, toMin, nowMin, uid } from './util.js';
 
-export const SYNCED = ['book', 'inv', 'state'];
-const KEYS = ['book', 'inv', 'state', 'count', 'day', 'shift', 'floor', 'trainees', 'priv', 'msgs', 'settings', 'conflicts'];
+export const SYNCED = ['book', 'state', 'inv', 'counts'];
+const KEYS = ['book', 'inv', 'state', 'counts', 'count', 'day', 'shift', 'floor', 'trainees', 'priv', 'msgs', 'settings', 'conflicts'];
 
 const EMPTY_BOOK = { schema: 3, title: 'Floor Book', subtitle: '', updated: null, outlets: [], people: [], messaging: '', posName: '', day: { end: '21:00', pmStart: '13:00', blocks: [] }, roles: [], lists: [], cats: [], cards: [], tasks: [], assignments: [], training: [], links: [] };
 const EMPTY_INV = { schema: 1, title: 'Inventory', updated: null, messaging: '', cats: [], lines: [], seen: null };
-const EMPTY_STATE = { schema: 1, updated: null, follow: [], wins: [], printed: [], invHistory: [] };
+const EMPTY_STATE = { schema: 1, updated: null, follow: [], wins: [], printed: [] };
+const EMPTY_COUNTS = { schema: 1, updated: null, history: [] };
 
 const defaults = () => ({
   book: { base: null, local: null, sha: null, syncedAt: null },
   inv: { base: null, local: null, sha: null, syncedAt: null },
   state: { base: null, local: null, sha: null, syncedAt: null },
+  counts: { base: null, local: null, sha: null, syncedAt: null },
   count: newCount(),
   day: { date: todayKey(), ticks: [], mine: [] },
   shift: { key: null, notes: [], f: {}, sentAt: null },
@@ -29,7 +34,7 @@ const defaults = () => ({
   trainees: [],
   priv: { staffPlan: null, cards: [] },
   msgs: {},
-  settings: { owner: '', repo: '', branch: 'main', token: '', name: '', role: 'floor', theme: 'auto', quick: true, lastExport: null, lastSync: null, setupDone: false, created: new Date().toISOString() },
+  settings: { owner: '', repo: '', branch: 'main', token: '', invOwner: '', invRepo: '', invBranch: 'main', invToken: '', name: '', initials: '', lastSyncError: '', role: 'floor', theme: 'auto', quick: true, lastExport: null, lastSync: null, setupDone: false, created: new Date().toISOString() },
   conflicts: []
 });
 
@@ -46,7 +51,26 @@ export async function load() {
   const d = defaults();
   for (const k of KEYS) S[k] = all[k] !== undefined ? all[k] : d[k];
   S.settings = Object.assign(d.settings, S.settings || {});
+  migrateHistory();
   rollDay();
+}
+
+/* Saved counts used to live in state.json as invHistory. They now live in counts.json,
+   so both people who order can share them. Moves anything left in the old place. */
+export function migrateHistory() {
+  const st = S.state && S.state.local;
+  if (!st || !('invHistory' in st)) return false;
+  const old = st.invHistory || [];
+  if (old.length) {
+    if (!S.counts.local) S.counts.local = clone(EMPTY_COUNTS);
+    const have = new Set(S.counts.local.history.map((h) => h.id));
+    old.forEach((h) => { if (!have.has(h.id)) S.counts.local.history.push(h); });
+    S.counts.local.updated = todayKey();
+    save('counts');
+  }
+  delete st.invHistory;
+  save('state');
+  return true;
 }
 
 /* Daily things reset on a new day. Shift notes roll over only once the report has been copied. */
@@ -79,9 +103,10 @@ export async function eraseAll() { await db.clearAll(); Object.assign(S, default
 export const B = () => S.book.local || EMPTY_BOOK;
 export const I = () => S.inv.local || EMPTY_INV;
 export const L = () => S.state.local || EMPTY_STATE;
+export const C = () => S.counts.local || EMPTY_COUNTS;
 export const hasBook = () => !!S.book.local;
 export const hasInv = () => !!S.inv.local;
-const EMPTY = { book: EMPTY_BOOK, inv: EMPTY_INV, state: EMPTY_STATE };
+const EMPTY = { book: EMPTY_BOOK, inv: EMPTY_INV, state: EMPTY_STATE, counts: EMPTY_COUNTS };
 
 export function edit(key, fn) {
   if (!S[key].local) S[key].local = clone(EMPTY[key]);
@@ -131,6 +156,13 @@ export const isMine = (id) => S.day.mine.indexOf(id) >= 0;
 export function toggleMine(id) { const i = S.day.mine.indexOf(id); if (i >= 0) S.day.mine.splice(i, 1); else S.day.mine.push(id); save('day'); }
 
 export const signName = () => String(S.settings.name || '').trim();
+/* Short initials for "counted by" and "changed by". Set on the More tab, or taken from the name. */
+export function initials() {
+  const set = String(S.settings.initials || '').replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3);
+  if (set) return set;
+  return signName().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+}
+export const whoAmI = () => initials() || signName();
 export function sign(L2) { const n = signName(); if (n) L2.push('', '— ' + n); }
 
 /* The newest "updated" date among a set of book items, used as the revision stamp on printouts. */

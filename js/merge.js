@@ -4,6 +4,8 @@
 // remote = the file on GitHub now
 // Rules: whoever changed something wins. If both changed the same item, this phone wins and
 // the GitHub version is kept in `conflicts` so nothing is silently lost.
+// Bookkeeping fields (`updated`, `by`) never count as a clash: the newer date wins, and `by`
+// follows this phone, so two people editing different parts of one item don't trip a warning.
 
 import { same, clone } from './util.js';
 
@@ -23,10 +25,22 @@ function mergeValue(base, local, remote, path, conflicts) {
   return clone(local);
 }
 
+const META = new Set(['updated', 'by']);
+
 function mergeObjects(base, local, remote, path, conflicts) {
   const out = {};
   const keys = new Set([...Object.keys(remote), ...Object.keys(local), ...Object.keys(base)]);
   for (const k of keys) {
+    if (META.has(k) && (k in local || k in remote) && (typeof local[k] !== 'object' || local[k] === null) && (typeof remote[k] !== 'object' || remote[k] === null)) {
+      const l = local[k], r = remote[k], b = base[k];
+      let v;
+      if (same(l, r) || same(r, b)) v = l;
+      else if (same(l, b)) v = r;
+      else if (k === 'updated') v = String(l || '') >= String(r || '') ? l : r;
+      else v = l;
+      if (v !== undefined) out[k] = v;
+      continue;
+    }
     const inL = k in local, inR = k in remote, inB = k in base;
     if (!inL && !inR) continue;
     if (!inL && inB && same(base[k], remote[k])) continue;            // phone removed it, GitHub didn't touch it

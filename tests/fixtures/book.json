@@ -1,0 +1,351 @@
+{
+ "schema": 3,
+ "title": "Sample Book",
+ "subtitle": "Example caf\u00e9",
+ "updated": "2026-01-15",
+ "outlets": [
+  "Dining room",
+  "Patio"
+ ],
+ "people": [
+  "Manager",
+  "Chef",
+  "Host"
+ ],
+ "messaging": "team chat",
+ "posName": "POS",
+ "day": {
+  "end": "21:00",
+  "pmStart": "13:00",
+  "blocks": [
+   {
+    "id": "open",
+    "name": "Open",
+    "start": "07:00",
+    "focus": "Set up the room before the doors open."
+   },
+   {
+    "id": "lunch",
+    "name": "Lunch",
+    "start": "11:00",
+    "focus": "Seat fast, refill often."
+   },
+   {
+    "id": "pm",
+    "name": "Afternoon",
+    "start": "14:00",
+    "focus": "Side work and restock."
+   },
+   {
+    "id": "dinner",
+    "name": "Dinner",
+    "start": "16:30",
+    "focus": "Full room, every table checked."
+   },
+   {
+    "id": "close",
+    "name": "Close",
+    "start": "20:00",
+    "focus": "Reset for the morning."
+   }
+  ]
+ },
+ "roles": [
+  {
+   "id": "floor",
+   "name": "Server"
+  },
+  {
+   "id": "lead",
+   "name": "Lead"
+  }
+ ],
+ "cats": [
+  {
+   "id": "basics",
+   "name": "Basics"
+  },
+  {
+   "id": "safety",
+   "name": "Safety"
+  },
+  {
+   "id": "service",
+   "name": "Service"
+  }
+ ],
+ "cards": [
+  {
+   "id": "opening-solo",
+   "cat": "basics",
+   "title": "Opening without a lead",
+   "why": "Someone has to run the room until a lead arrives.",
+   "steps": [
+    "Unlock and turn on the lights",
+    "Start the coffee",
+    "Check the reservation list"
+   ],
+   "watch": [
+    "Doors open on time"
+   ],
+   "numbered": true,
+   "draft": false,
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "set-table",
+   "cat": "service",
+   "title": "Setting a table",
+   "why": "Every table looks the same.",
+   "steps": [
+    "Wipe the table",
+    "Roll-ups at each seat",
+    "Water glasses upside down"
+   ],
+   "watch": [
+    "Chipped glasses"
+   ],
+   "numbered": true,
+   "draft": false,
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "safety-calls",
+   "cat": "safety",
+   "title": "Safety calls",
+   "why": "Nobody gets bumped carrying something hot.",
+   "steps": [
+    "Behind",
+    "Corner",
+    "Hot",
+    "Sharp"
+   ],
+   "watch": [],
+   "numbered": false,
+   "draft": false,
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "spill",
+   "cat": "safety",
+   "title": "Cleaning a spill",
+   "why": "Wet floors cause falls.",
+   "steps": [
+    "Stay with the spill",
+    "Call for a wet-floor sign",
+    "Mop and dry"
+   ],
+   "watch": [
+    "Glass in the spill"
+   ],
+   "numbered": true,
+   "draft": false,
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "close-room",
+   "cat": "basics",
+   "title": "Closing the room",
+   "why": "The morning shift starts clean.",
+   "steps": [
+    "Stack chairs",
+    "Restock [which station?]",
+    "Turn off the coffee"
+   ],
+   "watch": [],
+   "numbered": true,
+   "draft": true,
+   "updated": "2026-01-15"
+  }
+ ],
+ "lists": [
+  {
+   "id": "opening",
+   "name": "Opening",
+   "short": "Open",
+   "role": "floor",
+   "blocks": [
+    "open"
+   ],
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "side-work",
+   "name": "Side work",
+   "short": "Side work",
+   "role": "floor",
+   "byBlock": true,
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "standards",
+   "name": "Every table",
+   "short": "Standards",
+   "role": "floor",
+   "blocks": [
+    "lunch",
+    "dinner"
+   ],
+   "standards": true,
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "lead-close",
+   "name": "Lead close",
+   "short": "Close",
+   "role": "lead",
+   "blocks": [
+    "close"
+   ],
+   "note": "Sign the log when done.",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "deep-clean",
+   "name": "Deep clean",
+   "short": "Deep",
+   "role": "floor",
+   "blocks": [
+    "pm"
+   ],
+   "draft": true,
+   "updated": "2026-01-15"
+  }
+ ],
+ "tasks": [
+  {
+   "id": "t1",
+   "list": "opening",
+   "text": "Lights and music on",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t2",
+   "list": "opening",
+   "text": "Coffee brewing",
+   "card": "opening-solo",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t3",
+   "list": "opening",
+   "text": "Tables set",
+   "card": "set-table",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t4",
+   "list": "side-work",
+   "block": "pm",
+   "text": "Restock napkins",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t5",
+   "list": "side-work",
+   "block": "pm",
+   "text": "Polish glasses",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t6",
+   "list": "side-work",
+   "block": "close",
+   "text": "Empty the bus tubs",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t7",
+   "list": "standards",
+   "text": "Water within two minutes",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t8",
+   "list": "standards",
+   "text": "Check back after two bites",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t9",
+   "list": "lead-close",
+   "text": "Count the drawer",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t10",
+   "list": "lead-close",
+   "text": "Lock the patio door at [time]",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "t11",
+   "list": "deep-clean",
+   "text": "Wipe the shelves",
+   "updated": "2026-01-15"
+  }
+ ],
+ "assignments": [
+  {
+   "id": "a1",
+   "shift": "am",
+   "text": "Open the dining room",
+   "time": "07:00",
+   "card": "opening-solo",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "a2",
+   "shift": "am",
+   "text": "Patio setup",
+   "time": "10:30",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "a3",
+   "shift": "am",
+   "text": "Lunch section 1",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "a4",
+   "shift": "pm",
+   "text": "Dinner section 2",
+   "time": "16:30",
+   "updated": "2026-01-15"
+  },
+  {
+   "id": "a5",
+   "shift": "pm",
+   "text": "Close the room",
+   "time": "20:00",
+   "card": "close-room",
+   "by": "Lead",
+   "updated": "2026-01-15"
+  }
+ ],
+ "training": [
+  {
+   "id": "k-calls",
+   "text": "Safety calls",
+   "card": "safety-calls"
+  },
+  {
+   "id": "k-table",
+   "text": "Sets a table to standard",
+   "card": "set-table"
+  },
+  {
+   "id": "k-spill",
+   "text": "Cleans a spill safely",
+   "card": "spill"
+  }
+ ],
+ "links": [
+  {
+   "id": "l1",
+   "label": "Example link",
+   "url": "https://example.com/"
+  }
+ ]
+}

@@ -1,0 +1,48 @@
+{
+ "schema": 1,
+ "updated": "2026-01-15",
+ "follow": [
+  {
+   "id": "f1",
+   "text": "Which station gets restocked at close?",
+   "to": "Manager",
+   "created": "2026-01-10",
+   "status": "open",
+   "kind": "ask",
+   "updated": "2026-01-10"
+  },
+  {
+   "id": "f2",
+   "text": "Loose step by the patio door",
+   "to": "Manager",
+   "created": "2026-01-12",
+   "status": "open",
+   "kind": "flag",
+   "updated": "2026-01-12"
+  },
+  {
+   "id": "f3",
+   "text": "New napkin brand OK?",
+   "to": "Chef",
+   "created": "2026-01-05",
+   "status": "done",
+   "kind": "ask",
+   "answer": "Yes",
+   "answered": "2026-01-06",
+   "updated": "2026-01-06"
+  }
+ ],
+ "wins": [],
+ "printed": [
+  {
+   "id": "pr1",
+   "what": "book",
+   "label": "Full book",
+   "where": "Back office binder",
+   "date": "2026-01-02",
+   "rev": "2026-01-01",
+   "updated": "2026-01-02"
+  }
+ ],
+ "invHistory": []
+}

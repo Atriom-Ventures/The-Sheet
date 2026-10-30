@@ -27,9 +27,13 @@ Synced files are tied to the repo's id, so renaming the repo or the organization
 
 Adding a new part means a new repo, a new connection in `js/sync.js` and its screens; access to it then works the same way.
 
+## Tests
+
+`node tests/run-all.mjs` runs everything: sync between several phones against a fake GitHub, every screen drawing, and the accessibility checks. Node 20+, plus Python 3 with `lxml` for two of the accessibility checks. Details, and what the tests can't cover, in `tests/README.md`.
+
 ## Accessibility
 
-Target: WCAG 2.2 level AA. Checked on 10/29/26 (1.4.0), by script and by reading the code, not yet with a screen reader on a phone:
+Target: WCAG 2.2 level AA. Checked on 10/29/26 (1.4.0), by script (`tests/a11y`) and by reading the code, not yet with a screen reader on a phone:
 
 - **Contrast (1.4.3, 1.4.11):** every text color on every background it's used on, in light and dark, is at least 4.5:1; form-field borders, the focus ring and the selected-tab mark are at least 3:1. `--band-text` is the blue for text, because `--band` is too dark for text in dark mode.
 - **Names and labels (1.1.1, 1.3.1, 3.3.2, 4.1.2):** every field has a label; every button has a name, including icon-only ones; count steppers say which item they change ("Plus one, Coffee Lids"); decorative icons are hidden from screen readers.

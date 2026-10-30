@@ -1,0 +1,258 @@
+{
+ "schema": 1,
+ "title": "Sample inventory",
+ "updated": "2026-01-15",
+ "messaging": "team chat",
+ "cats": [
+  {
+   "id": "paper",
+   "name": "Paper goods"
+  },
+  {
+   "id": "coffee",
+   "name": "Coffee and tea"
+  },
+  {
+   "id": "clean",
+   "name": "Cleaning"
+  }
+ ],
+ "lines": [
+  {
+   "id": "ln-cups",
+   "cat": "paper",
+   "name": "Paper cups, 12 oz",
+   "unit": "sleeve",
+   "step": 1,
+   "par": 4,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-cups",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-12",
+     "perCase": 20
+    }
+   ]
+  },
+  {
+   "id": "ln-lids",
+   "cat": "paper",
+   "name": "Cup lids",
+   "unit": "sleeve",
+   "step": 1,
+   "par": 3,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-lids",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-lids"
+    }
+   ]
+  },
+  {
+   "id": "ln-napkins",
+   "cat": "paper",
+   "name": "Napkins",
+   "unit": "case",
+   "step": 0.5,
+   "par": 1,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-napkins",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-napkins"
+    }
+   ]
+  },
+  {
+   "id": "ln-boxes",
+   "cat": "paper",
+   "name": "To-go boxes",
+   "unit": "sleeve",
+   "step": 1,
+   "par": null,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-box-a",
+     "name": "Kraft box, large",
+     "brand": "Acme",
+     "code": "A-80"
+    },
+    {
+     "id": "p-box-b",
+     "name": "Kraft box, large (old brand)",
+     "brand": "Other Co",
+     "code": "O-80"
+    }
+   ]
+  },
+  {
+   "id": "ln-straws",
+   "cat": "paper",
+   "name": "Straws",
+   "unit": "box",
+   "step": 1,
+   "par": 2,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-straw-a",
+     "name": "Paper straws",
+     "brand": "Acme",
+     "code": "A-30",
+     "pref": true
+    },
+    {
+     "id": "p-straw-b",
+     "name": "Plastic straws",
+     "brand": "Other Co",
+     "code": "O-30"
+    }
+   ]
+  },
+  {
+   "id": "ln-coffee",
+   "cat": "coffee",
+   "name": "Coffee, regular",
+   "unit": "case",
+   "step": 1,
+   "par": 2,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-coffee",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-coffee"
+    }
+   ]
+  },
+  {
+   "id": "ln-decaf",
+   "cat": "coffee",
+   "name": "Coffee, decaf",
+   "unit": "case",
+   "step": 1,
+   "par": 1,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-decaf",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-decaf"
+    }
+   ]
+  },
+  {
+   "id": "ln-tea",
+   "cat": "coffee",
+   "name": "Tea, assorted",
+   "unit": "box",
+   "step": 1,
+   "par": 3,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-tea",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-tea"
+    }
+   ]
+  },
+  {
+   "id": "ln-cocoa",
+   "cat": "coffee",
+   "name": "Hot cocoa",
+   "unit": "box",
+   "step": 1,
+   "par": null,
+   "state": "useup",
+   "note": "",
+   "products": [
+    {
+     "id": "p-cocoa",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-cocoa"
+    }
+   ]
+  },
+  {
+   "id": "ln-soap",
+   "cat": "clean",
+   "name": "Dish soap",
+   "unit": "each",
+   "step": 1,
+   "par": 2,
+   "state": "active",
+   "note": "",
+   "products": [
+    {
+     "id": "p-soap",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-soap"
+    }
+   ]
+  },
+  {
+   "id": "ln-wipes",
+   "cat": "clean",
+   "name": "Sanitizer wipes",
+   "unit": "roll",
+   "step": 1,
+   "par": 4,
+   "state": "ask",
+   "note": "",
+   "products": [
+    {
+     "id": "p-wipes",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-wipes"
+    }
+   ]
+  },
+  {
+   "id": "ln-old-cups",
+   "cat": "paper",
+   "name": "Foam cups",
+   "unit": "sleeve",
+   "step": 1,
+   "par": null,
+   "state": "disc",
+   "note": "",
+   "products": [
+    {
+     "id": "p-old-cups",
+     "name": "",
+     "brand": "Acme",
+     "code": "A-old-cups"
+    }
+   ]
+  }
+ ],
+ "seen": {
+  "date": "2026-01-10",
+  "items": {
+   "p-lids": "about 2 sleeves"
+  }
+ }
+}

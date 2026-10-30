@@ -1,4 +1,4 @@
-// MultiTool: boot, routing, the app shell and global event handling.
+// The Sheet: boot, routing, the app shell and global event handling.
 
 import { app } from './app.js';
 import { S, load, rollDay, onChange, anyDirty, hasBook, isTicked, dirty } from './state.js';
@@ -16,7 +16,7 @@ import * as shift from './shift.js';
 import * as msgs from './msgs.js';
 import * as print from './print.js';
 
-app.version = '1.1.0';
+app.version = '1.2.0';
 const VIEWS = { now, book, count, lead, more, quick };
 const TABS = [['now', 'Now', ICON.now], ['book', 'Book', ICON.book], ['count', 'Count', ICON.count], ['lead', 'Lead', ICON.lead], ['more', 'More', ICON.more]];
 const INV_TABS = ['count', 'more'];
@@ -50,7 +50,7 @@ function statusChip() {
 function renderHeader() {
   const t = $('#top-in'); if (!t) return;
   const d = new Date();
-  t.innerHTML = '<div class="brand"><span class="brand-name">MultiTool</span><span class="brand-sub mono">' + esc(d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })) + '</span></div>' + statusChip();
+  t.innerHTML = '<div class="brand"><span class="brand-name">The Sheet</span><span class="brand-sub mono">' + esc(d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })) + '</span></div>' + statusChip();
 }
 function leadDot() {
   try { return lead.staleCount() > 0 || S.floor.people.some((p) => /overdue/.test(lead.floorSummary())); } catch (e) { return false; }
@@ -166,7 +166,7 @@ onChange((key) => {
 function iosBanner() {
   if (!iosBrowserTab() || app.route.tab === 'more') return;
   const b = $('#banner-root'); if (!b || b.innerHTML) return;
-  b.innerHTML = '<div class="wrap"><button class="banner warn" data-act="tab" data-id="more"><strong>You’re in Safari.</strong>Add MultiTool to your Home Screen (Share → Add to Home Screen) and use it from there, so your data is kept.</button></div>';
+  b.innerHTML = '<div class="wrap"><button class="banner warn" data-act="tab" data-id="more"><strong>You’re in Safari.</strong>Add The Sheet to your Home Screen (Share → Add to Home Screen) and use it from there, so your data is kept.</button></div>';
 }
 
 /* ---------- offline app updates ---------- */

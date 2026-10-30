@@ -12,17 +12,19 @@ const NAMES = { book: 'Book', state: 'Follow-ups and logs', inv: 'Inventory item
 
 function iosWarning() {
   if (!iosBrowserTab()) return '';
-  return '<div class="banner warn static"><strong>Add MultiTool to your Home Screen first.</strong>In Safari, tap Share, then Add to Home Screen. Open it from the new icon and set up there. Anything set up in this Safari tab stays here and won’t carry over.</div>';
+  return '<div class="banner warn static"><strong>Add The Sheet to your Home Screen first.</strong>In Safari, tap Share, then Add to Home Screen. Open it from the new icon and set up there. Anything set up in this Safari tab stays here and won’t carry over.</div>';
 }
 
 function connRow(which) {
   const c = conn(which), on = which === 'inv' ? invConfigured() : bookConfigured();
   const label = which === 'inv' ? 'Inventory' : 'Book';
+  const keyless = !on && c.owner && c.repo; // e.g. right after restoring a backup: keys aren't in backups
   let v;
   if (on) v = '<span class="mono">' + esc(repoLabel(c)) + '</span>';
+  else if (keyless) v = '<span class="mono">' + esc(repoLabel(c)) + '</span> · <b class="warn-t">needs its key</b>';
   else if (which === 'inv' && bookConfigured()) v = 'Using the book repo. Connect a shared repo so others can count and order with you.';
   else v = 'Not connected';
-  const btnLabel = on ? 'Change' : (which === 'inv' ? 'Connect shared repo' : 'Connect');
+  const btnLabel = on ? 'Change' : keyless ? 'Add key' : (which === 'inv' ? 'Connect shared repo' : 'Connect');
   return '<div class="conn-row"><div><b>' + label + '</b><div class="hint">' + v + '</div></div><button class="btn small ghost" data-act="conn-toggle" data-which="' + which + '">' + ICON.key + ' ' + btnLabel + '</button></div>';
 }
 
@@ -36,16 +38,20 @@ function setupCard() {
   return h + '</section>';
 }
 
+const knownRepo = (which) => { const c = conn(which); return !!(c.owner && c.repo); };
 function syncCard() {
-  if (!configured()) return setupCard();
+  // A restored backup brings the repo names but not the keys: show the rows so only the keys need pasting.
+  const restored = !configured() && (hasBook() || hasInv()) && (knownRepo('book') || knownRepo('inv'));
+  if (!configured() && !restored) return setupCard();
   let h = '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.sync + ' Sync</h2></div>' + iosWarning();
   const waiting = SYNCED.filter(dirty);
   h += '<p class="sync-status">' + (S.settings.lastSync ? 'Last synced ' + esc(ago(S.settings.lastSync)) : 'Not synced yet') + '. ' + (waiting.length ? '<b>Changes waiting:</b> ' + esc(waiting.map((k) => NAMES[k]).join(', ')) + '.' : 'Nothing waiting.') + '</p>';
   if (lastResult) h += '<p class="note">' + esc(lastResult) + '</p>';
   else if (S.settings.lastSyncError) h += '<p class="note warn-t">Last sync didn’t finish: ' + esc(S.settings.lastSyncError) + '</p>';
-  h += '<p class="hint">It also syncs on its own when the app opens and after you save a count, whenever there’s signal.</p>';
-  h += '<div class="row-actions"><button class="btn primary big" data-act="sync-now"' + (isSyncing() ? ' disabled' : '') + '>' + ICON.sync + (isSyncing() ? ' Syncing…' : ' Sync now') + '</button></div>';
+  if (!restored) h += '<p class="hint">It also syncs on its own when the app opens and after you save a count, whenever there’s signal.</p>';
+  if (!restored) h += '<div class="row-actions"><button class="btn primary big" data-act="sync-now"' + (isSyncing() ? ' disabled' : '') + '>' + ICON.sync + (isSyncing() ? ' Syncing…' : ' Sync now') + '</button></div>';
   const mode = appMode();
+  if (restored) h += '<p class="note">Restored from a backup. Paste the key for each connection to start syncing again.</p>';
   h += '<div class="conns">' + (mode === 'full' ? connRow('book') : '') + connRow('inv') + '</div>';
   if (showConn) h += connForm(showConn, false) + keyHelp(showConn);
   const notes = (S.conflicts || []).filter((c) => !c.review);
@@ -71,7 +77,7 @@ function keyHelp(which) {
   const inv = which === 'inv';
   return '<details class="todo-list"><summary>How to make the key</summary><ol class="help-steps">' +
     '<li>On github.com, open your picture → <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens</b>, and tap <b>Generate new token</b>.</li>' +
-    '<li>Name it “MultiTool phone”. Set an expiration you’re comfortable with (a year is fine; you’ll paste a new one when it runs out).</li>' +
+    '<li>Name it “The Sheet phone”. Set an expiration you’re comfortable with (a year is fine; you’ll paste a new one when it runs out).</li>' +
     (inv ? '<li><b>Resource owner:</b> pick the organization that owns the inventory repo, not your own account. If it isn’t listed, ask to be added to the organization first.</li>' : '') +
     '<li><b>Repository access:</b> Only select repositories → ' + (inv ? 'the inventory repo' : 'your book repo') + '. Nothing else.</li>' +
     '<li><b>Permissions → Repository permissions → Contents:</b> Read and write. Leave everything else as it is.</li>' +
@@ -105,7 +111,7 @@ function linksCard() {
 function aboutCard() {
   const full = appMode() !== 'inv';
   return '<section class="panel"><div class="row-h"><h2 class="sec-h">About</h2></div>' +
-    '<p>MultiTool ' + esc(app.version) + '. The app itself holds no work content. ' + (full ? 'The book comes from your private repo, and inventory from the shared inventory repo (or the book repo if there isn’t one); everything else stays on this phone.' : 'The inventory comes from the shared inventory repo; everything else stays on this phone.') + '</p>' +
+    '<p>The Sheet ' + esc(app.version) + '. The app itself holds no work content. ' + (full ? 'The book comes from your private repo, and inventory from the shared inventory repo (or the book repo if there isn’t one); everything else stays on this phone.' : 'The inventory comes from the shared inventory repo; everything else stays on this phone.') + '</p>' +
     (full ? '<ul class="plain-list"><li><b>Synced to the book repo:</b> book, follow-ups, wins, printed log.</li><li><b>Synced to the inventory repo:</b> inventory items, saved counts, order status.</li><li><b>Phone only:</b> today’s ticks, shift notes, floor board, trainees, message drafts, staffing plan, the count in progress, the keys.</li></ul>'
       : '<ul class="plain-list"><li><b>Shared:</b> inventory items, saved counts, order status, with your initials.</li><li><b>Phone only:</b> the count in progress and the key.</li></ul>') +
     '<div class="row-actions"><button class="btn small ghost" data-act="check-update">Check for an app update</button><button class="btn small danger" data-act="erase">' + ICON.trash + ' Erase this phone’s data</button></div></section>';
@@ -201,9 +207,9 @@ export const acts = {
     save('settings'); showConn = null; toast('Key removed from this phone. Your data stays.'); app.render();
   },
   'conflicts-clear': () => { S.conflicts = []; save('conflicts'); app.renderView(); },
-  'backup-share': async () => { const name = 'multitool-backup-' + todayKey() + '.json'; const r = await shareFile(name, backupJSON()); if (r !== 'cancelled') { S.settings.lastExport = new Date().toISOString(); save('settings'); toast(r === 'shared' ? 'Backup shared.' : 'Backup saved to Downloads.'); app.renderView(); } },
+  'backup-share': async () => { const name = 'the-sheet-backup-' + todayKey() + '.json'; const r = await shareFile(name, backupJSON()); if (r !== 'cancelled') { S.settings.lastExport = new Date().toISOString(); save('settings'); toast(r === 'shared' ? 'Backup shared.' : 'Backup saved to Downloads.'); app.renderView(); } },
   'import': () => importFile(),
-  'erase': async (el) => { if (!armed(el, 'Erase everything here?')) return; if (!confirm('Erase everything MultiTool has stored on this phone? Anything not synced or backed up is gone for good.')) return; await eraseAll(); toast('Erased.'); app.go('#now'); },
+  'erase': async (el) => { if (!armed(el, 'Erase everything here?')) return; if (!confirm('Erase everything The Sheet has stored on this phone? Anything not synced or backed up is gone for good.')) return; await eraseAll(); toast('Erased.'); app.go('#now'); },
   'check-update': async () => { try { const reg = await navigator.serviceWorker.getRegistration(); if (reg) { await reg.update(); toast(reg.waiting || reg.installing ? 'Update found. It’s getting ready.' : 'You have the latest version.'); } else toast('Updates work once the app is installed.'); } catch (e) { toast('Couldn’t check. Are you online?'); } }
 };
 export function onInput(el, ev) {

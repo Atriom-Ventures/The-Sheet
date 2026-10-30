@@ -11,7 +11,7 @@ function open() {
     req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE); };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
-    req.onblocked = () => reject(new Error('Storage is blocked. Close other MultiTool tabs and try again.'));
+    req.onblocked = () => reject(new Error('Storage is blocked. Close other tabs of The Sheet and try again.'));
   });
   return dbp;
 }

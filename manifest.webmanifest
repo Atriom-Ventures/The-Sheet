@@ -1,6 +1,6 @@
 {
-  "name": "MultiTool",
-  "short_name": "MultiTool",
+  "name": "The Sheet",
+  "short_name": "The Sheet",
   "description": "An offline shift tool: checklists, cards, counts and messages. Holds no data itself.",
   "id": "./",
   "start_url": "./",

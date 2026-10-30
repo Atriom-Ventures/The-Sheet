@@ -111,7 +111,7 @@ function backupBanner() {
 }
 
 export function render() {
-  if (!hasBook()) return '<section class="hero"><div class="eyebrow">Welcome</div><h1 class="block-name">MultiTool</h1><p class="focus">Nothing is loaded yet. Connect your book or import a backup to get started.</p><div class="blk-nav"><button class="now-b" data-act="tab" data-id="more">Set up</button></div></section>';
+  if (!hasBook()) return '<section class="hero"><div class="eyebrow">Welcome</div><h1 class="block-name">The Sheet</h1><p class="focus">Nothing is loaded yet. Connect your book or import a backup to get started.</p><div class="blk-nav"><button class="now-b" data-act="tab" data-id="more">Set up</button></div></section>';
   const st = blockState(), bl = st.bl;
   let h = '';
   if (bl.length) {

@@ -1,8 +1,11 @@
-// Sync with private GitHub repos through the GitHub API, using fine-grained keys that can only
-// read and write one repo each. There are two connections:
+// Sync with private GitHub repos through the GitHub API, using fine-grained keys.
+// Each "part" of the app lives in its own repo, and access is managed on GitHub, not in the app:
 //   book: book.json and state.json (one person's book, follow-ups and logs)
 //   inv:  inventory.json and counts.json (shared between the people who count and order)
-// If no inventory connection is set, inventory and counts sync to the book repo, as before.
+// Every sync asks GitHub what this key can do with each repo. Write access: normal. Read-only:
+// the part still loads but nothing is pushed, and the screens go view-only. No access: that part
+// stops syncing and says so. So adding or removing someone is a change on GitHub only.
+// Until a shared inventory repo has been connected, inventory and counts sync to the book repo.
 // Sync runs when you tap Sync, and quietly on its own when the app opens or a count is saved.
 
 import { S, save, flush, migrateHistory, whoAmI, SYNCED, dirty, hasBook, hasInv } from './state.js';
@@ -41,10 +44,25 @@ export function iosBrowserTab() {
 const repoId = (c) => (String(c.owner) + '/' + String(c.repo)).toLowerCase();
 export const repoLabel = (c) => c.owner + '/' + c.repo;
 
-/* Which connection a synced file goes to right now, or null if none. */
-export function target(key) {
-  if (INV_KEYS.includes(key)) return invConfigured() ? conn('inv') : (bookConfigured() ? conn('book') : null);
-  return bookConfigured() ? conn('book') : null;
+/* Which connection a synced file goes to right now ('book' | 'inv'), or null if none.
+   Once a shared inventory repo has been connected, inventory never falls back to the book repo,
+   even if the shared connection is removed: the book repo's copy would be stale. */
+export function connOf(key) {
+  if (INV_KEYS.includes(key)) {
+    if (invConfigured()) return 'inv';
+    return !S.settings.invShared && bookConfigured() ? 'book' : null;
+  }
+  return bookConfigured() ? 'book' : null;
+}
+export const target = (key) => { const w = connOf(key); return w ? conn(w) : null; };
+
+/* What this phone's key may do, as GitHub last said: { push, id, at }. Unknown counts as writable. */
+export const perm = (which) => (S.settings.perm && S.settings.perm[which]) || null;
+export function canWrite(key) {
+  const w = connOf(key);
+  if (!w) return true; // not connected: edits stay on the phone, as before
+  const p = perm(w);
+  return !p || p.push !== false;
 }
 
 function b64encode(str) {
@@ -82,14 +100,20 @@ async function gh(method, path, body, c) {
   return res;
 }
 
+/* Ask GitHub about the repo: is it there for this key, can the key write, what's its id.
+   The id stays the same if the repo or its organization is renamed. */
+async function repoMeta(c) {
+  const res = await gh('GET', '', null, c);
+  if (res.status === 404) throw new SyncError('Can’t see ' + repoLabel(c) + '. Either the name is wrong, the key wasn’t made for it (for an organization’s repo, the key’s owner has to be the organization), or your access was removed.', 404);
+  if (!res.ok) throw new SyncError('GitHub error ' + res.status + ' checking ' + repoLabel(c) + '.', res.status);
+  const j = await res.json();
+  return { id: j.id != null ? String(j.id) : null, push: !(j.permissions && j.permissions.push === false), branch: j.default_branch || c.branch || 'main', private: !!j.private };
+}
+
 async function getFile(path, c) {
   const res = await gh('GET', '/contents/' + path + '?ref=' + encodeURIComponent(c.branch || 'main'), null, c);
-  if (res.status === 404) {
-    // 404 means either "no such file yet" or "can't see the repo". Tell them apart.
-    const repo = await gh('GET', '', null, c);
-    if (repo.status === 404) throw new SyncError('Can’t see ' + repoLabel(c) + '. Check the name, and that the key was made for that repo (for an organization’s repo, pick the organization as the key’s owner).', 404);
-    return null;
-  }
+  if (res.status === 404) return null; // the repo was checked first, so this means "no such file yet"
+
   if (res.status === 409) return null; // empty repo with no commits yet
   if (!res.ok) throw new SyncError('GitHub error ' + res.status + ' reading ' + path + '.', res.status);
   const j = await res.json();
@@ -128,23 +152,34 @@ function whoChanged(doc, path) {
   return '';
 }
 
-/* One file: pull, merge, push if this phone has anything new. */
-async function syncOne(key, report, attempt = 0) {
+/* One file: pull, merge, push if this phone has anything new and is allowed to. */
+async function syncOne(key, report, meta, attempt = 0) {
   const c = target(key);
   if (!c) return;
   const path = FILES[key];
   const slot = S[key];
-  const rid = repoId(c);
+  const rid = meta && meta.id ? 'id:' + meta.id : repoId(c);
   // Older versions didn't record which repo a file came from; it was always the book repo.
   if (slot.src == null && slot.sha && bookConfigured()) slot.src = repoId(conn('book'));
-  if (slot.src !== rid) { slot.base = null; slot.sha = null; slot.src = rid; }
+  // Earlier 1.1 builds recorded owner/repo; switch to the id without starting over.
+  if (slot.src && slot.src === repoId(c) && rid.startsWith('id:')) slot.src = rid;
+  // A different repo than last time: nothing on the phone has been synced with it yet.
+  const fresh = slot.src !== rid;
+  if (fresh) { slot.base = null; slot.sha = null; slot.src = rid; }
+  const writable = !meta || meta.push;
   const remote = await getFile(path, c);
   const who = whoAmI();
   const msg = (verb) => verb + ' ' + path + (who ? ' (' + who + ')' : '');
+  if (!writable) {
+    // View only: take GitHub's copy as it is. Anything changed on this phone stays here, unsent.
+    if (remote && (remote.sha !== slot.sha || !same(slot.local, slot.base))) { if (remote.sha !== slot.sha) report.pulled.push(key); slot.local = clone(remote.json); slot.base = clone(remote.json); slot.sha = remote.sha; }
+    if (remote) slot.syncedAt = new Date().toISOString();
+    return;
+  }
   if (!remote) {
     if (slot.local) {
       const r = await putFile(path, slot.local, null, msg('Add'), c);
-      if (r.conflict) { if (attempt < 1) return syncOne(key, report, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
+      if (r.conflict) { if (attempt < 1) return syncOne(key, report, meta, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
       slot.base = clone(slot.local); slot.sha = r.sha; slot.syncedAt = new Date().toISOString(); report.pushed.push(key);
     }
     return;
@@ -157,7 +192,9 @@ async function syncOne(key, report, attempt = 0) {
   if (remote.sha === slot.sha && !localChanged) { slot.syncedAt = new Date().toISOString(); return; }
   let next = slot.local, conflicts = [];
   if (remote.sha !== slot.sha) {
-    const m = mergeDoc(slot.base, slot.local, remote.json);
+    // First sync with this repo (a new phone, a restored backup, a newly connected repo): GitHub's
+    // copy is the shared truth, so it wins any differences. Things only this phone has are kept.
+    const m = mergeDoc(slot.base, slot.local, remote.json, fresh ? { prefer: 'remote' } : undefined);
     next = m.doc; conflicts = m.conflicts;
     if (!same(remote.json, slot.base)) report.pulled.push(key);
   }
@@ -165,13 +202,13 @@ async function syncOne(key, report, attempt = 0) {
     slot.local = clone(remote.json); slot.base = clone(remote.json); slot.sha = remote.sha;
   } else {
     const r = await putFile(path, next, remote.sha, msg('Update'), c);
-    if (r.conflict) { if (attempt < 1) return syncOne(key, report, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
+    if (r.conflict) { if (attempt < 1) return syncOne(key, report, meta, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
     slot.local = clone(next); slot.base = clone(next); slot.sha = r.sha; report.pushed.push(key);
   }
   slot.syncedAt = new Date().toISOString();
   if (conflicts.length) {
     report.conflicts += conflicts.length;
-    const review = INV_KEYS.includes(key);
+    const review = INV_KEYS.includes(key) && !fresh;
     if (review) report.review += conflicts.length;
     const at = new Date().toISOString();
     S.conflicts = (S.conflicts || []).concat(conflicts.map((cf) => Object.assign({ id: 'cf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), key, file: path, at, review, who: whoChanged(remote.json, cf.path) }, cf))).slice(-50);
@@ -184,14 +221,34 @@ let running = null;
 export function syncAll() {
   if (running) return running;
   running = (async () => {
-    const report = { pulled: [], pushed: [], conflicts: 0, review: 0, errors: [] };
+    const report = { pulled: [], pushed: [], conflicts: 0, review: 0, errors: [], readOnly: [] };
+    const addErr = (e) => { if (!report.errors.some((x) => x.message === e.message)) report.errors.push(e); };
     try {
+      if (invConfigured()) S.settings.invShared = true;
+      // Check each connection once: reachable? writable? Then sync its files.
+      const metas = {};
+      for (const w of ['book', 'inv']) {
+        if (!Object.keys(FILES).some((k) => connOf(k) === w)) continue;
+        try {
+          const m = await repoMeta(conn(w));
+          metas[w] = m;
+          S.settings.perm = Object.assign({}, S.settings.perm, { [w]: { push: m.push, id: m.id, at: new Date().toISOString() } });
+          if (!m.push) report.readOnly.push(w);
+        } catch (e) {
+          addErr(e);
+          if (e.status === 404 || e.status === 401) S.settings.perm = Object.assign({}, S.settings.perm, { [w]: { push: false, lost: true, at: new Date().toISOString() } });
+        }
+      }
       for (const key of Object.keys(FILES)) {
-        try { await syncOne(key, report); }
-        catch (e) { if (!report.errors.some((x) => x.message === e.message)) report.errors.push(e); }
+        const w = connOf(key);
+        if (!w || !metas[w]) continue;
+        try { await syncOne(key, report, metas[w]); }
+        catch (e) { addErr(e); }
         save(key);
       }
-      if (migrateHistory()) { try { await syncOne('state', report); await syncOne('counts', report); } catch (e) { report.errors.push(e); } }
+      if (migrateHistory()) {
+        for (const key of ['state', 'counts']) { const w = connOf(key); if (w && metas[w]) { try { await syncOne(key, report, metas[w]); } catch (e) { addErr(e); } } }
+      }
       if (!report.errors.length) { S.settings.lastSync = new Date().toISOString(); S.settings.lastSyncError = ''; }
       else S.settings.lastSyncError = report.errors[0].message || 'Sync didn’t finish.';
       save('settings');

@@ -9,6 +9,8 @@
 
 import { same, clone } from './util.js';
 
+let PREFER = 'phone'; // 'remote' on a first sync with a repo: GitHub's shared copy wins differences
+
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const isIdArray = (a) => Array.isArray(a) && a.length > 0 && a.every((x) => isObj(x) && typeof x.id === 'string');
 
@@ -21,6 +23,7 @@ function mergeValue(base, local, remote, path, conflicts) {
     return mergeArrays(base || [], local || [], remote || [], path, conflicts);
   }
   if (isObj(local) && isObj(remote)) return mergeObjects(isObj(base) ? base : {}, local, remote, path, conflicts);
+  if (PREFER === 'remote') { conflicts.push({ path, kept: 'github', theirs: clone(remote), ours: clone(local), note: 'First sync with this repo: GitHub’s version kept' }); return clone(remote); }
   conflicts.push({ path, kept: 'phone', theirs: clone(remote), ours: clone(local) });
   return clone(local);
 }
@@ -37,7 +40,7 @@ function mergeObjects(base, local, remote, path, conflicts) {
       if (same(l, r) || same(r, b)) v = l;
       else if (same(l, b)) v = r;
       else if (k === 'updated') v = String(l || '') >= String(r || '') ? l : r;
-      else v = l;
+      else v = PREFER === 'remote' ? r : l;
       if (v !== undefined) out[k] = v;
       continue;
     }
@@ -90,10 +93,13 @@ function mergeArrays(base, local, remote, path, conflicts) {
   return order.map((id) => result.get(id));
 }
 
-export function mergeDoc(base, local, remote) {
+export function mergeDoc(base, local, remote, opts) {
   const conflicts = [];
   if (local == null) return { doc: clone(remote), conflicts };
   if (remote == null) return { doc: clone(local), conflicts };
-  const doc = mergeValue(base == null ? {} : base, local, remote, '', conflicts);
-  return { doc, conflicts };
+  PREFER = opts && opts.prefer === 'remote' ? 'remote' : 'phone';
+  try {
+    const doc = mergeValue(base == null ? {} : base, local, remote, '', conflicts);
+    return { doc, conflicts };
+  } finally { PREFER = 'phone'; }
 }

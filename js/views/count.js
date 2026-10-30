@@ -2,7 +2,7 @@
 
 import { app } from '../app.js';
 import { S, I, C, save, edit, hasInv, newCount, signName, whoAmI } from '../state.js';
-import { autoSync } from '../sync.js';
+import { autoSync, canWrite, perm, connOf } from '../sync.js';
 import { esc, fmtNum, parseQty, round2, fmtShort, dateOf, uid, slug, copyText, shareText, todayKey, $, cssEsc, debounce, ago, daysSince, clone } from '../util.js';
 import { ICON, seg, chip, empty, toast, armed, opts } from '../ui.js';
 
@@ -88,6 +88,18 @@ export function countSummary() {
   return '<button class="glance-b" data-act="go" data-id="#count/order"><span class="g-k">' + ICON.count + ' Count</span><span class="g-v">' + p.counted + '/' + p.total + (p.low ? ' · <b class="warn-t">' + p.low + ' low</b>' : '') + '</span></button>';
 }
 
+/* ---------- access ----------
+   What this phone may do with the shared inventory comes from GitHub (see sync.js). View only:
+   counting and copying the order still work, but nothing is saved to the shared copy. */
+const ro = () => !canWrite('counts');
+function accessNote() {
+  const w = connOf('counts'); if (!w) return '';
+  const p = perm(w) || {};
+  if (p.lost) return '<p class="note warn-t">This phone can’t reach the shared inventory anymore: the key stopped working or access was removed. What you see is from the last sync. <button class="link inline" data-act="tab" data-id="more">Check the connection</button></p>';
+  if (p.push === false) return '<p class="note">View only. You can count and copy the order, but saving counts, marking orders and changing items need write access. Whoever runs the GitHub organization can give it.</p>';
+  return '';
+}
+
 /* ---------- order status ----------
    A saved count with something to order is an order: not placed yet → placed → received.
    An unplaced order is replaced as soon as anyone saves a newer count that has its own order. */
@@ -112,6 +124,7 @@ function orderLine(e, st) {
 }
 const ORDER_CLASS = { saved: 'warn', placed: 'go', received: 'ok', replaced: 'muted' };
 function orderButtons(e, st, small) {
+  if (ro()) return '';
   const c = small ? 'btn small' : 'btn';
   if (st === 'saved') return '<button class="' + c + ' primary" data-act="ord-placed" data-id="' + esc(e.id) + '">' + ICON.check + ' Mark placed</button>';
   if (st === 'placed') return '<button class="' + c + ' primary" data-act="ord-received" data-id="' + esc(e.id) + '">' + ICON.check + ' Mark received</button><button class="' + c + ' ghost" data-act="ord-unplace" data-id="' + esc(e.id) + '">Not placed after all</button>';
@@ -132,6 +145,7 @@ function openOrdersHTML() {
   }).join('');
 }
 function setOrder(id, fn) {
+  if (ro()) { toast('View only: marking orders needs write access.'); return; }
   edit('counts', (c) => { const e = (c.history || []).find((x) => x.id === id); if (e) { e.order = Object.assign({ status: 'saved' }, e.order || {}); fn(e.order); e.updated = todayKey(); } });
   autoSync('save', 800);
 }
@@ -296,8 +310,8 @@ function orderTab() {
   if (r.nopar.length) h += '<h3 class="sub-title">Counted, no minimum yet <span class="n">' + r.nopar.length + '</span></h3><p class="hint">Set a minimum in Items and they’ll be ordered automatically next time.</p><div class="olist">' + r.nopar.map((o) => simpleRow(o.l.name, fmtQty(o.st.total, o.l.unit))).join('') + '</div>';
   if (r.pick.length) h += '<h3 class="sub-title">Pick one product to reorder <span class="n">' + r.pick.length + '</span></h3><p class="hint">More than one product counts toward each of these. In Items, mark the one to keep buying with “Order this one”.</p><div class="olist">' + r.pick.map((l) => simpleRow(l.name, l.products.length + ' products')).join('') + '</div>';
   h += '<h3 class="sub-title">Message for ' + esc(I().messaging || 'team chat') + '</h3><pre class="chit" id="order-text">' + esc(orderText(r)) + '</pre>';
-  h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button><button class="btn" data-act="count-save">' + ICON.check + ' Save count</button></div>';
-  h += '<p class="hint">Save count adds it to History, where everyone who orders can see it and mark it placed, and starts a fresh count.</p>';
+  h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button>' + (ro() ? '' : '<button class="btn" data-act="count-save">' + ICON.check + ' Save count</button>') + '</div>';
+  if (!ro()) h += '<p class="hint">Save count adds it to History, where everyone who orders can see it and mark it placed, and starts a fresh count.</p>';
   if (r.todo.length) h += '<details class="todo-list"><summary>Not counted yet (' + r.todo.length + ')</summary><p>' + r.todo.map((l) => esc(l.name)).join(' · ') + '</p></details>';
   h += confirmNew ? '<div class="confirm"><p>Clear every count in progress and start over? Saved counts stay in History.</p><div class="row-actions"><button class="btn" data-act="count-new-no">Keep counting</button><button class="btn danger solid" data-act="count-new-yes">Clear and start over</button></div></div>' : '<p><button class="link" data-act="count-new">Start a new count</button></p>';
   return h;
@@ -317,7 +331,7 @@ function historyTab() {
     const n = Object.keys(e.counts || {}).length, st = orderState(e, H);
     const tag = st !== 'none' ? '<span class="otag o-' + ORDER_CLASS[st] + '">' + esc(orderLine(e, st)) + '</span>' : '';
     return '<details class="hist"><summary><span class="hdate">' + esc(dateOf(e.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })) + '</span><span class="hby">' + esc(e.by || '') + '</span><span class="hsum">' + n + ' products counted' + (e.orderCount ? ' · ' + e.orderCount + ' to order' : '') + '</span>' + tag + '</summary>' +
-      '<div class="hbody"><pre class="chit">' + esc(e.text || '') + '</pre>' + (st !== 'none' && st !== 'replaced' ? '<div class="row-actions">' + orderButtons(e, st, true) + '</div>' : '') + '<div class="row-actions"><button class="btn small" data-act="hist-copy" data-id="' + esc(e.id) + '">' + ICON.copy + ' Copy</button><button class="btn small danger" data-act="hist-del" data-id="' + esc(e.id) + '">' + ICON.trash + ' Delete</button></div></div></details>';
+      '<div class="hbody"><pre class="chit">' + esc(e.text || '') + '</pre>' + (st !== 'none' && st !== 'replaced' ? '<div class="row-actions">' + orderButtons(e, st, true) + '</div>' : '') + '<div class="row-actions"><button class="btn small" data-act="hist-copy" data-id="' + esc(e.id) + '">' + ICON.copy + ' Copy</button>' + (ro() ? '' : '<button class="btn small danger" data-act="hist-del" data-id="' + esc(e.id) + '">' + ICON.trash + ' Delete</button>') + '</div></div></details>';
   }).join('');
 }
 
@@ -328,7 +342,7 @@ function itemsTab() {
   let h = '<div class="istats"><span><b>' + ls.filter((l) => l.state === 'active').length + '</b> active lines</span><span><b>' + nopar + '</b> without a minimum</span><span><b>' + pick + '</b> need one product picked</span></div>';
   I().cats.forEach((c) => {
     const cl = ls.filter((l) => l.cat === c.id); if (!cl.length) return;
-    h += '<section class="inv-cat"><h2 class="band">' + esc(c.name) + '</h2><div class="sheet-l">' + cl.map((l) => itemRow(l)).join('') + '<button class="add-line" data-act="item-add" data-cat="' + esc(c.id) + '">' + ICON.plus + ' Add a line to ' + esc(c.name) + '</button></div></section>';
+    h += '<section class="inv-cat"><h2 class="band">' + esc(c.name) + '</h2><div class="sheet-l">' + cl.map((l) => itemRow(l)).join('') + (ro() ? '' : '<button class="add-line" data-act="item-add" data-cat="' + esc(c.id) + '">' + ICON.plus + ' Add a line to ' + esc(c.name) + '</button>') + '</div></section>';
   });
   return h;
 }
@@ -373,7 +387,7 @@ function redrawItem(id) { const el = document.getElementById('I-' + id); const l
 export function render(route) {
   if (!hasInv()) return empty('No inventory loaded yet. It comes from the inventory repo once you connect. <button class="link inline" data-act="tab" data-id="more">Set up</button>');
   const sub = route.sub || 'count';
-  let h = reviewHTML() + '<div class="view-top">' + seg('go-csub', SUBS.map(([k, l]) => [k, k === 'order' ? orderLabel() : l]), sub) + '<div class="view-acts"><button class="pill-b" data-act="print" data-kind="count">' + ICON.print + ' Sheet</button></div></div>';
+  let h = accessNote() + reviewHTML() + '<div class="view-top">' + seg('go-csub', SUBS.map(([k, l]) => [k, k === 'order' ? orderLabel() : l]), sub) + '<div class="view-acts"><button class="pill-b" data-act="print" data-kind="count">' + ICON.print + ' Sheet</button></div></div>';
   if (sub === 'order') h += orderTab();
   else if (sub === 'history') h += historyTab();
   else if (sub === 'items') h += itemsTab();
@@ -396,6 +410,7 @@ export const acts = {
   'ord-share': async () => { const r = await shareText(orderText(computeOrder()), 'Order'); if (r === 'copied') toast('Order copied.'); },
   'count-save': () => {
     const r = computeOrder();
+    if (ro()) { toast('View only: saving counts needs write access. Copy the order instead.'); return; }
     if (!Object.keys(S.count.counts).length) { toast('Count something first.'); return; }
     const orderCount = r.order.filter((o) => o.qty > 0).length;
     const entry = { id: uid('h'), date: todayKey(), savedAt: new Date().toISOString(), by: whoAmI(), counts: Object.assign({}, S.count.counts), orders: Object.assign({}, S.count.orders), orderCount, text: orderText(r), updated: todayKey() };
@@ -409,21 +424,22 @@ export const acts = {
   'count-new-no': () => { confirmNew = false; app.renderView(); },
   'count-new-yes': () => { S.count = newCount(); save('count'); confirmNew = false; toast('Started a new count.'); app.go('#count'); },
   'hist-copy': async (el) => { const e = hist().find((x) => x.id === el.dataset.id); if (e && await copyText(e.text || '')) toast('Copied.'); },
-  'hist-del': (el) => { if (!armed(el, 'Delete this count?')) return; edit('counts', (c) => { c.history = (c.history || []).filter((x) => x.id !== el.dataset.id); }); autoSync('save', 800); app.renderView(); toast('Deleted.'); },
+  'hist-del': (el) => { if (ro()) return; if (!armed(el, 'Delete this count?')) return; edit('counts', (c) => { c.history = (c.history || []).filter((x) => x.id !== el.dataset.id); }); autoSync('save', 800); app.renderView(); toast('Deleted.'); },
   'ord-placed': (el) => { setOrder(el.dataset.id, (o) => { o.status = 'placed'; o.placedAt = new Date().toISOString(); o.placedBy = whoAmI(); }); app.renderView(); toast('Marked placed.'); },
   'ord-received': (el) => { setOrder(el.dataset.id, (o) => { o.status = 'received'; o.receivedAt = new Date().toISOString(); o.receivedBy = whoAmI(); }); app.renderView(); toast('Marked received.'); },
   'ord-unplace': (el) => { if (!armed(el, 'Not placed?')) return; setOrder(el.dataset.id, (o) => { o.status = 'saved'; delete o.placedAt; delete o.placedBy; }); app.renderView(); },
   'ord-unreceive': (el) => { if (!armed(el, 'Not received?')) return; setOrder(el.dataset.id, (o) => { o.status = 'placed'; delete o.receivedAt; delete o.receivedBy; }); app.renderView(); },
   'clash-mine': (el) => { dropClash(el.dataset.id); app.renderView(); },
   'clash-theirs': (el) => {
+    if (ro()) { toast('View only: nothing to change here.'); return; }
     const c = reviewList().find((x) => x.id === el.dataset.id); if (!c) return;
     let done = false;
     edit(c.key, (doc) => { done = setAtPath(doc, c.path, c.theirs); });
     dropClash(c.id); autoSync('save', 800); app.renderView();
     toast(done ? 'Switched to ' + (c.who || 'their') + (c.who ? '’s' : '') + ' version.' : 'That item isn’t there anymore.');
   },
-  'item-open': (el) => { const prev = openItem; openItem = openItem === el.dataset.id ? null : el.dataset.id; if (prev) redrawItem(prev); redrawItem(el.dataset.id); },
-  'item-add': (el) => { const id = uid('ln'); edit('inv', (inv) => { const l = { id, cat: el.dataset.cat, name: 'New item', unit: 'case', step: 1, par: null, state: 'active', note: '', products: [{ id: uid('p'), name: '', brand: '', code: '' }] }; stamp(l); inv.lines.push(l); }); openItem = id; app.renderView(); setTimeout(() => { const n = document.getElementById('ie-name-' + id); if (n) { n.focus(); n.select(); } }, 60); },
+  'item-open': (el) => { if (ro()) { toast('View only: item changes need write access.'); return; } const prev = openItem; openItem = openItem === el.dataset.id ? null : el.dataset.id; if (prev) redrawItem(prev); redrawItem(el.dataset.id); },
+  'item-add': (el) => { if (ro()) return; const id = uid('ln'); edit('inv', (inv) => { const l = { id, cat: el.dataset.cat, name: 'New item', unit: 'case', step: 1, par: null, state: 'active', note: '', products: [{ id: uid('p'), name: '', brand: '', code: '' }] }; stamp(l); inv.lines.push(l); }); openItem = id; app.renderView(); setTimeout(() => { const n = document.getElementById('ie-name-' + id); if (n) { n.focus(); n.select(); } }, 60); },
   'item-del': (el) => { if (!armed(el, 'Delete this line?')) return; const id = el.dataset.id; const l = lines().find((x) => x.id === id); edit('inv', (inv) => { inv.lines = inv.lines.filter((x) => x.id !== id); }); if (l) l.products.forEach((p) => delete S.count.counts[p.id]); save('count'); openItem = null; app.renderView(); toast('Line deleted.'); },
   'prod-add': (el) => { editLine(el.dataset.line, (l) => { l.products.push({ id: uid('p'), name: '', brand: '', code: '' }); }); redrawItem(el.dataset.line); },
   'prod-del': (el) => { if (!armed(el, 'Remove?')) return; const l = findLineOfProduct(el.dataset.pid); if (!l) return; if (l.products.length < 2) { toast('A line needs at least one product. Delete the line instead.'); return; } editLine(l.id, (x) => { x.products = x.products.filter((p) => p.id !== el.dataset.pid); }); delete S.count.counts[el.dataset.pid]; save('count'); redrawItem(l.id); }

@@ -13,6 +13,20 @@ A phone with only an inventory connection runs in **count-only mode**: just the 
 
 Setup links: `#setup=owner/repo` prefills the book connection, `#setup=inv:owner/repo` the inventory one. On an iPhone, add the app to the Home Screen first and set up inside the installed app: its storage is separate from Safari's, and Safari may clear a tab's data after a week without a visit.
 
+## Access
+
+Access is managed on GitHub, not in the app. Each part of the app lives in its own private repo in the organization, and people get to parts through teams:
+
+- Set the organization's base permission to **No permission**, so members see only what a team gives them.
+- One team per job (for example, a team with **Write** on the inventory repo). Add **Read** for anyone who should only look.
+- Keys for the organization use **All repositories**. A key only reaches what its owner has been given, so a new grant needs no new key.
+
+Every sync asks GitHub what the key may do with each repo. Write: normal. Read: the part loads but nothing is sent, and the Count screens go view-only. No access (removed from the team, or the key revoked or expired): that part stops syncing and says so. What's already on a phone stays there; removing access stops future syncing, it can't wipe a phone.
+
+Synced files are tied to the repo's id, so renaming the repo or the organization doesn't restart anything. On a phone's first sync with a repo (a new phone, a restored backup), GitHub's copy wins any differences and anything only the phone has is added.
+
+Adding a new part means a new repo, a new connection in `js/sync.js` and its screens; access to it then works the same way.
+
 ## Sync
 
 - Works offline after the first load (service worker). Data lives in IndexedDB on the phone.

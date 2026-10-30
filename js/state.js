@@ -34,7 +34,7 @@ const defaults = () => ({
   trainees: [],
   priv: { staffPlan: null, cards: [] },
   msgs: {},
-  settings: { owner: '', repo: '', branch: 'main', token: '', invOwner: '', invRepo: '', invBranch: 'main', invToken: '', name: '', initials: '', lastSyncError: '', role: 'floor', theme: 'auto', quick: true, lastExport: null, lastSync: null, setupDone: false, created: new Date().toISOString() },
+  settings: { owner: '', repo: '', branch: 'main', token: '', invOwner: '', invRepo: '', invBranch: 'main', invToken: '', name: '', initials: '', lastSyncError: '', invShared: false, perm: {}, role: 'floor', theme: 'auto', quick: true, lastExport: null, lastSync: null, setupDone: false, created: new Date().toISOString() },
   conflicts: []
 });
 
@@ -51,6 +51,7 @@ export async function load() {
   const d = defaults();
   for (const k of KEYS) S[k] = all[k] !== undefined ? all[k] : d[k];
   S.settings = Object.assign(d.settings, S.settings || {});
+  if (S.settings.invOwner && S.settings.invRepo) S.settings.invShared = true;
   migrateHistory();
   rollDay();
 }

@@ -455,7 +455,8 @@ export const acts = {
   'prod-del': (el) => { if (!armed(el, 'Remove?')) return; const l = findLineOfProduct(el.dataset.pid); if (!l) return; if (l.products.length < 2) { toast('A line needs at least one product. Delete the line instead.'); return; } editLine(l.id, (x) => { x.products = x.products.filter((p) => p.id !== el.dataset.pid); }); delete S.count.counts[el.dataset.pid]; save('count'); redrawItem(l.id); }
 };
 
-const NUM_HELP = 'That isn’t a number this can read. Try 2, 2.5, 2 1/2 or ½.';
+// The number keypad has digits and a decimal point only, so the hint sticks to those.
+const NUM_HELP = 'That isn’t a number this can read. Type a number like 2 or 2.5.';
 const saveItemField = debounce((el) => {
   if (el.dataset.ie) {
     const k = el.dataset.ie, id = el.dataset.line;
@@ -472,6 +473,9 @@ const saveItemField = debounce((el) => {
     editProduct(el.dataset.pid, (p) => { if (v === undefined || v === '') delete p[k]; else p[k] = v; });
   }
 }, 350);
+
+/* Finish an item edit that's still waiting to be saved (the app is going to the background). */
+export function flushEdits() { saveItemField.flush(); }
 
 export function onInput(el, ev) {
   if (el.dataset.search === 'inv') { q = el.value; const list = $('#inv-list'); if (list) list.innerHTML = countList(); return true; }

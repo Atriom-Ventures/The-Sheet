@@ -1,7 +1,7 @@
 // The Sheet: boot, routing, the app shell and global event handling.
 
 import { app } from './app.js';
-import { S, load, rollDay, onChange, anyDirty, hasBook, isTicked, dirty } from './state.js';
+import { S, load, rollDay, onChange, anyDirty, hasBook, isTicked, dirty, flush } from './state.js';
 import { $, esc, ago, debounce } from './util.js';
 import { ICON, closeSheet, isSheetOpen, toast } from './ui.js';
 import { configured, appMode, autoSync, onAutoSync, isSyncing, iosBrowserTab } from './sync.js';
@@ -16,7 +16,7 @@ import * as shift from './shift.js';
 import * as msgs from './msgs.js';
 import * as print from './print.js';
 
-app.version = '1.4.1';
+app.version = '1.4.2';
 const VIEWS = { now, book, count, lead, more, quick };
 const TABS = [['now', 'Now', ICON.now], ['book', 'Book', ICON.book], ['count', 'Count', ICON.count], ['lead', 'Lead', ICON.lead], ['more', 'More', ICON.more]];
 const INV_TABS = ['count', 'more'];
@@ -153,7 +153,14 @@ setInterval(() => {
   if ((app.route.tab === 'now' || app.route.tab === 'quick' || (app.route.tab === 'lead' && app.route.sub === 'floor')) && !isSheetOpen() && !typing) app.renderView();
   renderHeader();
 }, 15000);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { rollDay(); if (!isSheetOpen()) app.render(); autoSync('open'); } });
+/* Going to the background (another app, a locked screen) or closing: save anything still waiting,
+   now. iOS can close a backgrounded app without warning, and saves normally wait a moment. */
+function saveNow() {
+  try { count.flushEdits(); } catch (e) { console.error(e); }
+  flush().catch((e) => { S.storageError = String(e && e.message || e); });
+}
+window.addEventListener('pagehide', saveNow);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { saveNow(); return; } if (document.visibilityState === 'visible') { rollDay(); if (!isSheetOpen()) app.render(); autoSync('open'); } });
 window.addEventListener('online', () => { renderHeader(); autoSync('online', 1500); });
 window.addEventListener('offline', renderHeader);
 

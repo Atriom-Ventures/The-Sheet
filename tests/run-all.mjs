@@ -25,6 +25,7 @@ const node = process.execPath;
 // Sync runs in three time zones, including the two furthest from UTC, to catch date bugs.
 for (const tz of ['UTC', 'Pacific/Kiritimati', 'Pacific/Pago_Pago']) step('Sync, ' + tz, node, [path.join(HERE, 'sync.test.mjs')], { env: { TZ: tz } });
 step('Order amounts, shared text', node, [path.join(HERE, 'count.test.mjs')]);
+step('Saves when the app goes to the background', node, [path.join(HERE, 'background.test.mjs')]);
 step('Every screen draws', node, [path.join(HERE, 'shell.test.mjs')]);
 step('Tap-twice confirm', node, [path.join(HERE, 'confirm.test.mjs')]);
 const r = step('Draw screens for the markup check', node, [path.join(HERE, 'a11y', 'render.mjs')], { capture: true });
@@ -33,7 +34,7 @@ if (drawn) step('Markup (labels, names, headings)', 'python3', [path.join(HERE, 
 step('Color contrast', 'python3', [path.join(HERE, 'a11y', 'contrast.py')]);
 
 console.log('\n\n######## Summary');
-for (const [label, status] of results) console.log((status === 'FAILED' ? '  ✗ ' : status.startsWith('skipped') ? '  – ' : '  ✓ ') + label.padEnd(36) + status);
+for (const [label, status] of results) console.log((status === 'FAILED' ? '  ✗ ' : status.startsWith('skipped') ? '  – ' : '  ✓ ') + label.padEnd(44) + status);
 const failed = results.some(([, s]) => s === 'FAILED');
 if (failed) console.log('\nScratch files kept for a look: ' + out);
 else fs.rmSync(out, { recursive: true, force: true });

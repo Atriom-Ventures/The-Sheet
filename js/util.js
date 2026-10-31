@@ -110,4 +110,10 @@ export function parseQty(str) {
   return round2(total);
 }
 
-export function debounce(fn, ms) { let t = null; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+export function debounce(fn, ms) {
+  let t = null, pending = null;
+  const run = () => { const a = pending; pending = null; t = null; if (a) fn(...a); };
+  const d = (...a) => { clearTimeout(t); pending = a; t = setTimeout(run, ms); };
+  d.flush = () => { clearTimeout(t); run(); }; // do the waiting call now, if there is one
+  return d;
+}

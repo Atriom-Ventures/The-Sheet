@@ -405,4 +405,46 @@ GH.repos[SHARED].priv = true;
 r = await E.sy.syncAll();
 check(!r.errors.length && readJSON(SHARED, 'counts.json').history.some((h) => h.id === pending), 'private again → it goes');
 
+console.log('\n20. A deleted saved count stays deleted');
+GH.tokens['tok-g'] = [SHARED];
+await wait(1200); await E.sy.syncAll(); await F.sy.syncAll();
+const hasCount = (doc, id) => !!doc && (doc.history || []).some((h) => h.id === id);
+const shared = () => readJSON(SHARED, 'counts.json');
+const oldCopy = JSON.parse(JSON.stringify(E.S.counts.local)); // what an old phone or an old backup still has
+const [X, Y, Z, W] = E.S.counts.local.history.slice(0, 4).map((h) => h.id);
+check(W && hasCount(F.S.counts.local, X), '(setup: both phones have the same saved counts)');
+E.act('hist-del', { id: X, armed: '1' });
+await wait(1000); await E.sy.syncAll(); await F.sy.syncAll();
+check(!hasCount(shared(), X) && !hasCount(F.S.counts.local, X), 'deleted on one phone → gone from GitHub and the other phone');
+const marks = shared().gone || {};
+check(Object.keys(marks).join() === X && /^\d{4}-\d\d-\d\dT/.test(marks[X]), 'GitHub keeps only a marker: the count’s id and when it was deleted');
+const G = await boot('G', Object.assign(invOnly('tok-g', 'GG'), { counts: { base: null, local: oldCopy, sha: null, src: null } }));
+r = await G.sy.syncAll();
+check(!r.errors.length && !hasCount(G.S.counts.local, X) && !hasCount(shared(), X), 'an old phone or old backup that still has it doesn’t bring it back');
+check(hasCount(G.S.counts.local, Y) && hasCount(shared(), Y), '…and the counts it should have are all there');
+E.S.counts.local.history.push(oldCopy.history.find((h) => h.id === X)); E.st.save('counts');
+await E.sy.syncAll();
+check(!hasCount(E.S.counts.local, X) && !hasCount(shared(), X), 'if it turns up on a phone again some other way, it isn’t sent back');
+GH.offline = true;
+E.act('hist-del', { id: Y, armed: '1' });
+F.act('ord-placed', { id: Y });
+await wait(1000); GH.offline = false;
+await F.sy.syncAll(); r = await E.sy.syncAll();
+const yOnGH = (shared().history || []).find((h) => h.id === Y);
+check(hasCount(E.S.counts.local, Y) && yOnGH && yOnGH.order && yOnGH.order.status === 'placed', 'deleted on one phone while the other marked it placed: kept, so the order isn’t lost');
+check(E.S.conflicts.some((c) => /Deleted on the phone/.test(c.note || '') && String(c.path).includes(Y)), '…with a note saying so');
+await E.sy.syncAll(); await F.sy.syncAll(); await G.sy.syncAll();
+check([E, F, G].every((P) => hasCount(P.S.counts.local, Y)) && hasCount(shared(), Y), '…and it stays on every phone afterwards');
+GH.offline = true;
+E.act('hist-del', { id: Z, armed: '1' });
+await wait(5); // a moment apart, so the two deletion times differ
+F.act('hist-del', { id: Z, armed: '1' });
+await wait(1000); GH.offline = false;
+const cfF = F.S.conflicts.length;
+await E.sy.syncAll(); r = await F.sy.syncAll();
+check(r.conflicts === 0 && F.S.conflicts.length === cfF, 'both phones delete the same count: no clash');
+await E.sy.syncAll(); await G.sy.syncAll();
+check([E, F, G].every((P) => !hasCount(P.S.counts.local, Z)) && !hasCount(shared(), Z), '…and it’s gone everywhere');
+check(hasCount(shared(), W) && hasCount(G.S.counts.local, W), 'counts nobody deleted are untouched');
+
 T.done();

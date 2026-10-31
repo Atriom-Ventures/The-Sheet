@@ -91,7 +91,7 @@ function backupCard() {
   const inv = appMode() === 'inv';
   return '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.download + ' Backup</h2></div>' +
     (inv ? '<p>Saved counts and items are already kept in the shared repo. A backup file also holds the count in progress. The GitHub key is left out.</p>'
-      : '<p>A backup file holds the book, inventory, saved counts and settings. It never holds the GitHub keys, shift notes, the floor board, message drafts or clash notes: those are daily and can name people.</p><p class="hint">It does hold trainees and the staffing plan as plain text. Keep backup files somewhere private, and delete old ones.</p>') +
+      : '<p>A backup file holds the book, inventory, saved counts and settings. It never holds the GitHub keys, shift notes, the floor board, message drafts, clash notes or the staffing plan: those are daily, can name people, or have their own file.</p><p class="hint">It does hold trainees as plain text. Keep backup files somewhere private, and delete old ones. On a new phone, import the staffing plan file separately.</p>') +
     '<p class="hint">Last backup file: ' + esc(S.settings.lastExport ? ago(S.settings.lastExport) : 'never') + '.</p>' +
     '<div class="row-actions"><button class="btn" data-act="backup-share">' + ICON.share + ' Save backup</button><button class="btn ghost" data-act="import">' + ICON.upload + ' Import a file</button></div>' +
     (inv ? '' : '<p class="hint">Import takes a backup file, the phone-only staffing plan file, or a book or inventory file.</p>') + '</section>';
@@ -131,8 +131,9 @@ export function render() {
    by room or table), the floor board and break times, remembered staff names, message drafts
    (incident notes included) and clash notes (copies of both sides' values). They're daily, and they
    can name people; a backup file goes to Downloads or wherever it's shared. Keys never go in. */
-const BACKUP_KEYS = ['book', 'inv', 'state', 'counts', 'count', 'day', 'trainees', 'priv', 'settings'];
-const NEVER_RESTORE = ['shift', 'floor', 'msgs', 'conflicts']; // older backups may still have them
+const BACKUP_KEYS = ['book', 'inv', 'state', 'counts', 'count', 'day', 'trainees', 'settings'];
+// Older backups may still have these. The staffing plan (priv) comes only from its own phone-only file.
+const NEVER_RESTORE = ['shift', 'floor', 'msgs', 'conflicts', 'priv'];
 const NO_BACKUP_SETTINGS = ['token', 'invToken', 'floorNames'];
 export function backupJSON() {
   const data = {};

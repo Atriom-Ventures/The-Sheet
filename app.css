@@ -1,5 +1,15 @@
 /* The Sheet (formerly MultiTool). Layout idea, kept from the Floor Book: "the pass". A dark heat-lamp panel says what's happening now,
    quiet ticket-rail lists sit below, and navigation stays under the thumb. Inventory keeps the blue bands of the paper order sheet. */
+/* Fonts ship with the app (fonts/, SIL Open Font License; license files alongside), so nothing loads from outside GitHub.
+   Latin and Latin-extended only; anything else falls back to the phone's own fonts. */
+@font-face{font-family:'Atkinson Hyperlegible';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/atkinson-hyperlegible-400.woff2) format('woff2')}
+@font-face{font-family:'Atkinson Hyperlegible';font-style:normal;font-weight:700;font-display:swap;src:url(fonts/atkinson-hyperlegible-700.woff2) format('woff2')}
+@font-face{font-family:'Atkinson Hyperlegible';font-style:italic;font-weight:400;font-display:swap;src:url(fonts/atkinson-hyperlegible-400-italic.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/ibm-plex-mono-400.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/ibm-plex-mono-500.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:600;font-display:swap;src:url(fonts/ibm-plex-mono-600.woff2) format('woff2')}
+@font-face{font-family:'Sofia Sans Extra Condensed';font-style:normal;font-weight:700;font-display:swap;src:url(fonts/sofia-sans-extra-condensed-700.woff2) format('woff2')}
+@font-face{font-family:'Sofia Sans Extra Condensed';font-style:normal;font-weight:800;font-display:swap;src:url(fonts/sofia-sans-extra-condensed-800.woff2) format('woff2')}
 :root{
   --bg:#EDF0EE; --surface:#FFFFFF; --sunk:#F4F6F5; --ink:#15202A; --muted:#55626D;
   --line:#D6DDD9; --line-strong:#B6C1BC; --field-line:#7E8984;

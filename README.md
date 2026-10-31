@@ -2,7 +2,7 @@
 
 (Formerly MultiTool.) An offline, installable shift tool: checklists, how-to cards, an assignment sheet, an inventory count with ordering, shift notes, a floor board with breaks, follow-ups, and plain-text messages for team chat.
 
-**This repository holds no data.** It's an empty app. Content comes from private repositories that the app reads and writes through the GitHub API, with fine-grained tokens stored only on the phone. Phone-only things (shift notes, the floor board, trainee names, message drafts, the count in progress) never leave the device.
+**This repository holds no data.** It's an empty app. Content comes from private repositories that the app reads and writes through the GitHub API, with fine-grained tokens stored only on the phone. Phone-only things (shift notes, the floor board, trainees, message drafts, the staffing plan, the count in progress) never sync. A backup file, saved by hand, holds the synced parts plus trainees, the staffing plan and the count in progress; it never holds the keys, shift notes, the floor board, message drafts or clash notes.
 
 ## Two connections
 

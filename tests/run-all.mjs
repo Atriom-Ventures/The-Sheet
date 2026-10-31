@@ -26,6 +26,7 @@ const node = process.execPath;
 for (const tz of ['UTC', 'Pacific/Kiritimati', 'Pacific/Pago_Pago']) step('Sync, ' + tz, node, [path.join(HERE, 'sync.test.mjs')], { env: { TZ: tz } });
 step('Order amounts, shared text', node, [path.join(HERE, 'count.test.mjs')]);
 step('Saves when the app goes to the background', node, [path.join(HERE, 'background.test.mjs')]);
+step('Backups leave out daily and personal data', node, [path.join(HERE, 'backup.test.mjs')]);
 step('Every screen draws', node, [path.join(HERE, 'shell.test.mjs')]);
 step('Tap-twice confirm', node, [path.join(HERE, 'confirm.test.mjs')]);
 const r = step('Draw screens for the markup check', node, [path.join(HERE, 'a11y', 'render.mjs')], { capture: true });

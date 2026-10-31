@@ -9,7 +9,7 @@
 // Sync runs when you tap Sync, and quietly on its own when the app opens or a count is saved.
 
 import { S, save, flush, migrateHistory, whoAmI, SYNCED, dirty, hasBook, hasInv } from './state.js';
-import { mergeDoc, getAtPath } from './merge.js';
+import { mergeDoc, getAtPath, dropGone } from './merge.js';
 import { clone, same } from './util.js';
 
 const API = 'https://api.github.com';
@@ -208,6 +208,7 @@ async function syncOne(key, report, meta, attempt = 0) {
   }
   if (!remote) {
     if (slot.local) {
+      dropGone(slot.local);
       const sent = clone(slot.local);
       const r = await putFile(path, sent, null, msg('Add'), c);
       if (r.conflict) { if (attempt < 1) return syncOne(key, report, meta, attempt + 1); throw new SyncError(path + ' changed while syncing. Try again.', 409); }
@@ -223,6 +224,8 @@ async function syncOne(key, report, meta, attempt = 0) {
   }
   const localChanged = !same(slot.local, slot.base);
   if (remote.sha === slot.sha && !localChanged) { slot.syncedAt = new Date().toISOString(); return; }
+  // Anything with a deletion marker stays deleted, even if it came back onto this phone another way.
+  dropGone(slot.local);
   let next = slot.local, conflicts = [];
   if (remote.sha !== slot.sha) {
     // First sync with this repo (a new phone, a restored backup, a newly connected repo): GitHub's

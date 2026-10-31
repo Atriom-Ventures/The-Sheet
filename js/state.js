@@ -65,7 +65,8 @@ export function migrateHistory() {
   if (old.length) {
     if (!S.counts.local) S.counts.local = clone(EMPTY_COUNTS);
     const have = new Set(S.counts.local.history.map((h) => h.id));
-    old.forEach((h) => { if (!have.has(h.id)) S.counts.local.history.push(h); });
+    const gone = S.counts.local.gone || {}; // deleted on purpose: don't bring back
+    old.forEach((h) => { if (!have.has(h.id) && !Object.prototype.hasOwnProperty.call(gone, h.id)) S.counts.local.history.push(h); });
     S.counts.local.updated = todayKey();
     save('counts');
   }

@@ -2,7 +2,7 @@
 
 (Formerly MultiTool.) An offline, installable shift tool: checklists, how-to cards, an assignment sheet, an inventory count with ordering, shift notes, a floor board with breaks, follow-ups, and plain-text messages for team chat.
 
-**This repository holds no data.** It's an empty app. Content comes from private repositories that the app reads and writes through the GitHub API, with fine-grained tokens stored only on the phone. Phone-only things (shift notes, the floor board, trainees, message drafts, the staffing plan, the count in progress) never sync. A backup file, saved by hand, holds the synced parts plus trainees, the staffing plan and the count in progress; it never holds the keys, shift notes, the floor board, message drafts or clash notes.
+**This repository holds no data.** It's an empty app. Content comes from private repositories that the app reads and writes through the GitHub API, with fine-grained tokens stored only on the phone. Phone-only things (shift notes, the floor board, trainees, message drafts, the staffing plan, the count in progress) never sync. A backup file, saved by hand, holds the synced parts plus trainees and the count in progress; it never holds the keys, shift notes, the floor board, message drafts, clash notes or the staffing plan (which comes only from its own phone-only file).
 
 ## Two connections
 
@@ -53,8 +53,10 @@ Still to do: a pass with TalkBack (Android) and VoiceOver (iPhone); the printed 
 ## Sync
 
 - Works offline after the first load (service worker). Data lives in IndexedDB on the phone.
+- GitHub's API is the only outside address the app contacts. Everything else, fonts included, ships with the app; the page's security rules allow nothing else, and `tests/offline.test.mjs` checks it.
 - Syncs when you tap Sync, and quietly on its own when the app opens, comes back to the front or regains signal, after a count is saved, and about 20 seconds after an item edit.
 - Merges three ways (last-synced copy, phone, GitHub), item by item. Saved counts are new records, so two people's counts never collide. Bookkeeping fields (`updated`, `by`) never count as a clash.
+- A deleted saved count stays deleted. The shared file keeps a marker (the count's id and when it was deleted, nothing else), so an old phone or an old backup that still has the count can't bring it back. If one phone deletes a count while another changes it (marks it placed, say), the count is kept and a note says so, so an order isn't lost.
 - Saving a count or editing an item while a sync is sending is safe: the change stays on the phone and goes up in a quiet sync right after.
 - If two phones change the same inventory field between syncs, the phone's value stays and a "Keep mine / Use theirs" prompt appears on the Count tab. Once that value changes again (someone settles on something newer), the prompt goes away, so an old prompt can't undo a newer change. For the book, the phone wins and a merge note is kept under More → Sync.
 - Everything from the shared files is shown as text, never as page markup, since anyone with access can edit them (even by hand on github.com).
@@ -73,3 +75,5 @@ Prints a revision stamp on every page and keeps a log of where printed copies we
 Internal names stay as they were (the IndexedDB name `multitool`, backup type `multitool-backup`, private-file type `multitool-private`) so older backup files still import.
 
 No build step: plain HTML, CSS and ES modules. To release a change, bump `VERSION` in `sw.js` (and `app.version` in `js/main.js`) so installed copies pick it up.
+
+Fonts (in `fonts/`): Atkinson Hyperlegible, IBM Plex Mono and Sofia Sans Extra Condensed, all under the SIL Open Font License (license files alongside). They were made from the google/fonts repository's files, cut down to Latin and Latin-extended letters, and saved as WOFF2.

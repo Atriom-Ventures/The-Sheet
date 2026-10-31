@@ -6,11 +6,14 @@
 // the GitHub version is kept in `conflicts` so nothing is silently lost.
 // Bookkeeping fields (`updated`, `by`) never count as a clash: the newer date wins, and `by`
 // follows this phone, so two people editing different parts of one item don't trip a warning.
+// Deletion markers (`gone`, id → when): a record deleted on purpose (today, a saved count) stays
+// deleted, even when an old phone or an old backup that still has it syncs for the first time.
 
 import { same, clone } from './util.js';
 
 let PREFER = 'phone'; // 'remote' on a first sync with a repo, or when this phone can't send: GitHub's copy wins differences
 let NOTE = '';
+let KEPT = new Set(); // ids a deletion clash kept, so their deletion markers are lifted
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const isIdArray = (a) => Array.isArray(a) && a.length > 0 && a.every((x) => isObj(x) && typeof x.id === 'string');
@@ -68,13 +71,13 @@ function mergeArrays(base, local, remote, path, conflicts) {
       if (!b) { result.set(id, clone(l)); continue; }                 // new on the phone
       if (same(l, b)) continue;                                        // GitHub deleted it, phone didn't change it
       conflicts.push({ path: path + '[' + id + ']', kept: 'phone', note: 'Deleted on GitHub, changed on the phone' });
-      result.set(id, clone(l)); continue;
+      KEPT.add(id); result.set(id, clone(l)); continue;
     }
     if (r && !l) {
       if (!b) { result.set(id, clone(r)); continue; }                 // new on GitHub
       if (same(r, b)) continue;                                        // phone deleted it, GitHub didn't change it
       conflicts.push({ path: path + '[' + id + ']', kept: 'github', note: 'Deleted on the phone, changed on GitHub' });
-      result.set(id, clone(r)); continue;
+      KEPT.add(id); result.set(id, clone(r)); continue;
     }
   }
   // Order: use the phone's order if only the phone reordered, otherwise GitHub's.
@@ -94,16 +97,65 @@ function mergeArrays(base, local, remote, path, conflicts) {
   return order.map((id) => result.get(id));
 }
 
+/* Deletion markers live in the document's top-level `gone` map: { id: when }. */
+const GONE = 'gone';
+const goneOf = (d) => (isObj(d) && isObj(d[GONE]) ? d[GONE] : {});
+const withoutGone = (d) => { if (!isObj(d) || !(GONE in d)) return d; const c = Object.assign({}, d); delete c[GONE]; return c; };
+
+/* Record that a record was deleted on purpose. Call it in the same edit that removes the record. */
+export function markGone(doc, id, when) {
+  if (!isObj(doc) || typeof id !== 'string' || !id) return;
+  if (!isObj(doc[GONE])) doc[GONE] = {};
+  doc[GONE][id] = when || new Date().toISOString();
+}
+
+/* Remove any record whose id has a deletion marker, at any depth. Changes the doc in place. */
+export function dropGone(doc) {
+  const g = goneOf(doc);
+  if (!Object.keys(g).length) return doc;
+  (function walk(node) {
+    if (Array.isArray(node)) {
+      for (let i = node.length - 1; i >= 0; i--) {
+        const x = node[i];
+        if (isObj(x) && typeof x.id === 'string' && Object.prototype.hasOwnProperty.call(g, x.id)) node.splice(i, 1);
+        else walk(x);
+      }
+    } else if (isObj(node)) {
+      for (const k of Object.keys(node)) if (node !== doc || k !== GONE) walk(node[k]);
+    }
+  })(doc);
+  return doc;
+}
+
+/* Markers merge three ways without ever clashing: a marker added on either side is kept; one that was
+   lifted on either side (a deletion clash kept the record) stays lifted. */
+function mergeGone(base, local, remote) {
+  const b = goneOf(base), l = goneOf(local), r = goneOf(remote);
+  const out = {};
+  for (const id of new Set([...Object.keys(l), ...Object.keys(r)])) {
+    const inL = id in l, inR = id in r, inB = id in b;
+    if (inL && inR) out[id] = String(l[id]) <= String(r[id]) ? l[id] : r[id];
+    else if (!inB) out[id] = inL ? l[id] : r[id];
+  }
+  return out;
+}
+
 export function mergeDoc(base, local, remote, opts) {
   const conflicts = [];
-  if (local == null) return { doc: clone(remote), conflicts };
-  if (remote == null) return { doc: clone(local), conflicts };
+  if (local == null) return { doc: dropGone(clone(remote)), conflicts };
+  if (remote == null) return { doc: dropGone(clone(local)), conflicts };
   PREFER = opts && opts.prefer === 'remote' ? 'remote' : 'phone';
   NOTE = (opts && opts.note) || '';
+  KEPT = new Set();
   try {
-    const doc = mergeValue(base == null ? {} : base, local, remote, '', conflicts);
+    const marks = isObj(local) && isObj(remote) ? mergeGone(base, local, remote) : null;
+    const doc = mergeValue(base == null ? {} : withoutGone(base), withoutGone(local), withoutGone(remote), '', conflicts);
+    if (marks && isObj(doc)) {
+      KEPT.forEach((id) => { delete marks[id]; });
+      if (Object.keys(marks).length) { doc[GONE] = marks; dropGone(doc); }
+    }
     return { doc, conflicts };
-  } finally { PREFER = 'phone'; NOTE = ''; }
+  } finally { PREFER = 'phone'; NOTE = ''; KEPT = new Set(); }
 }
 
 /* Paths in merge notes look like .lines[ln_x].products[p_y].par: a field after a dot, an item id in

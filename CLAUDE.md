@@ -2,6 +2,7 @@
 
 - Plain HTML, CSS and ES modules. No build step, no dependencies.
 - This repo is public and holds no content. No work-specific names, people, places, items or data, in code, tests or commit messages. Content lives in private repos that the app syncs with. Test data in `tests/fixtures` is made up; keep it that way.
+- Never push to `main`: it publishes straight to every phone. Push a branch and open a pull request; Mitch merges it. (If a pull request can't be opened from the session, give Mitch the `pull/new/<branch>` link.)
 - Before pushing, run `node tests/run-all.mjs`. Everything must pass. See `tests/README.md` for what it covers and doesn't.
 - To release: bump `VERSION` in `sw.js` and `app.version` in `js/main.js` so installed phones offer the update. Add any new app file to `SHELL` in `sw.js`.
 - Accessibility target is WCAG 2.2 AA (details in `README.md`). Icon-only buttons need an `aria-label`. A new text or background color pairing goes in `tests/a11y/contrast.py`.

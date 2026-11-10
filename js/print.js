@@ -151,8 +151,12 @@ function countHTML() {
   const inv = I();
   const unitW = (u) => u === 'each' ? 'each' : u;
   let h = '<section class="pv-sec"><h2 class="pv-h">' + esc(inv.title || 'Inventory') + ' count</h2>' + stamp() + '<p class="pv-when">Date ______________ &nbsp; Counted by ______________</p>';
-  inv.cats.forEach((cat) => {
-    const ls = inv.lines.filter((l) => l.cat === cat.id && l.state === 'active');
+  // Same order as the Count screen: sections and lines A to Z.
+  const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
+  const cats = inv.cats.slice().sort(byName), ids = new Set(cats.map((c) => c.id));
+  if (inv.lines.some((l) => l.state === 'active' && !ids.has(l.cat))) cats.push({ id: null, name: 'No section', missing: true });
+  cats.forEach((cat) => {
+    const ls = inv.lines.filter((l) => (cat.missing ? !ids.has(l.cat) : l.cat === cat.id) && l.state === 'active').sort(byName);
     if (!ls.length) return;
     h += '<h3 class="pv-band">' + esc(cat.name) + '</h3><table class="pv-count"><thead><tr><th>Item</th><th>Min</th><th>On hand</th><th>Order</th></tr></thead><tbody>' +
       ls.map((l) => '<tr><td>' + esc(l.name) + (l.products.length > 1 ? ' <span class="pv-small">(' + l.products.length + ' products)</span>' : '') + '</td><td class="mono">' + (l.par != null ? esc(fmtNum(l.par) + ' ' + unitW(l.unit)) : '—') + '</td><td></td><td></td></tr>').join('') + '</tbody></table>';

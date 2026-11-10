@@ -120,7 +120,8 @@ export function render() {
     h += weekendBanner(st) + backupBanner();
     h += '<div class="glance">' + floorSummary() + countSummary() + '</div>';
     h += '<section class="block" id="notes-card">' + notesCard() + '</section>';
-    h += '<section class="block" id="mine">' + mineHTML() + '</section>';
+    // My jobs is off unless turned on in More → This phone.
+    if (S.settings.showJobs) h += '<section class="block" id="mine">' + mineHTML() + '</section>';
     const b = bl[idx];
     const roles = B().roles.filter((r) => B().lists.some((l) => l.role === r.id && !l.draft));
     if (roles.length && !roles.some((r) => r.id === S.settings.role)) S.settings.role = roles[0].id;

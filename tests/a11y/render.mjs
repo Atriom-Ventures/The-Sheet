@@ -70,5 +70,19 @@ if (task) save('sheet-task-edit', act('task-edit', { id: task.id }));
 save('sheet-print', act('print', { kind: 'book' }));
 const tm = /data-act="open-tmpl" data-id="([^"]+)"/.exec((location.hash = '#lead/msgs', mk('view').innerHTML));
 if (tm) save('sheet-tmpl', act('open-tmpl', { id: tm[1] }));
+// How a line is counted (one in sleeves with a per-case number, one in cases), and a section's name.
+location.hash = '#count';
+save('sheet-how-sleeves', act('inv-how', { line: 'ln-cups' }));
+save('sheet-how-cases', act('inv-how', { line: 'ln-napkins' }));
+save('sheet-section-rename', act('cat-rename', { id: 'paper' }));
+save('sheet-section-new', act('cat-new', {}));
+// Shift notes with an earlier shift waiting, on each of its three parts.
+S.shift.held = [{ key: '2026-01-14|PM', notes: [{ id: 'nh1', t: '18:05', tag: 'equip', text: 'Ice machine slow' }], f: {}, sentAt: null }];
+save('sheet-notes-report', act('notes', { seg: 'report' }));
+save('sheet-notes-earlier', act('notes', { seg: 'earlier' }));
+S.shift.sentAt = '12:30'; S.shift.sentHow = 'copied';
+save('sheet-notes-sent', act('notes', {}));
+// My jobs, for anyone who turns it back on.
+S.settings.showJobs = true; location.hash = '#lead'; location.hash = '#now'; save('now-with-jobs', mk('view').innerHTML); S.settings.showJobs = false;
 console.log(out);
 process.exit(0);

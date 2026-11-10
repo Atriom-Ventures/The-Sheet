@@ -120,6 +120,7 @@ function phoneCard() {
     field('st-init', 'Initials', input('st-init', s.initials || '', 'data-setting="initials" autocomplete="off" autocapitalize="characters" maxlength="3" placeholder="' + esc(whoAmI() || 'AB') + '"'), 'On counts and item changes', 'half') +
     field('st-theme', 'Look', '<select id="st-theme" data-setting="theme">' + opts([['auto', 'Match the phone'], ['light', 'Light'], ['dark', 'Dark']], s.theme) + '</select>', '', 'half') +
     (full ? field('st-quick', 'Small screens', '<select id="st-quick" data-setting="quick">' + opts([['true', 'Open to the quick view'], ['false', 'Normal view']], String(s.quick !== false)) + '</select>', 'Like the Flip’s cover screen', 'half') : '') +
+    (full ? field('st-jobs', 'My jobs on Now', '<select id="st-jobs" data-setting="showJobs">' + opts([['false', 'Hidden'], ['true', 'Shown']], String(!!s.showJobs)) + '</select>', 'Pick your jobs from the assignment sheet', 'half') : '') +
     '</div><p class="hint">Storage: ' + esc(ps) + '</p>' + (full ? '<div class="row-actions"><button class="btn small ghost" data-act="go" data-id="#quick">' + ICON.grid + ' Open quick view</button></div>' : '') + '</section>';
 }
 function linksCard() {
@@ -257,6 +258,7 @@ export function onInput(el, ev) {
   if (!el.dataset.setting) return false;
   const k = el.dataset.setting;
   if (k === 'quick') S.settings.quick = el.value === 'true';
+  else if (k === 'showJobs') S.settings.showJobs = el.value === 'true';
   else if (k === 'initials') { S.settings.initials = el.value.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 3); if (el.value !== S.settings.initials && ev.type === 'change') el.value = S.settings.initials; }
   else S.settings[k] = el.value;
   save('settings');

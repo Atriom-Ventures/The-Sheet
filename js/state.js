@@ -33,12 +33,12 @@ const defaults = () => ({
   plans: { base: null, local: null, sha: null, syncedAt: null },
   count: newCount(),
   day: { date: todayKey(), ticks: [], mine: [] },
-  shift: { key: null, notes: [], f: {}, sentAt: null },
+  shift: { key: null, notes: [], f: {}, sentAt: null, held: [] },
   floor: { date: todayKey(), people: [] },
   trainees: [],
   priv: { staffPlan: null, cards: [] },
   msgs: {},
-  settings: { owner: '', repo: '', branch: 'main', token: '', invOwner: '', invRepo: '', invBranch: 'main', invToken: '', trainOwner: '', trainRepo: '', trainBranch: 'main', trainToken: '', name: '', initials: '', lastSyncError: '', invShared: false, perm: {}, role: 'floor', theme: 'auto', quick: true, lastExport: null, lastSync: null, setupDone: false, created: new Date().toISOString() },
+  settings: { owner: '', repo: '', branch: 'main', token: '', invOwner: '', invRepo: '', invBranch: 'main', invToken: '', trainOwner: '', trainRepo: '', trainBranch: 'main', trainToken: '', name: '', initials: '', lastSyncError: '', invShared: false, perm: {}, role: 'floor', theme: 'auto', quick: true, showJobs: false, lastExport: null, lastSync: null, setupDone: false, created: new Date().toISOString() },
   conflicts: []
 });
 
@@ -79,14 +79,22 @@ export function migrateHistory() {
   return true;
 }
 
-/* Daily things reset on a new day. Shift notes roll over only once the report has been copied. */
+/* Daily things reset on a new day.
+   Shift notes: when a new shift starts, notes whose report was copied or shared clear. Notes that were
+   never sent are held under "Earlier, not sent" until they're sent or deleted, so a new shift never has
+   to wait on them. Everything here stays on this phone. */
 export function rollDay() {
   const t = todayKey();
   if (!S.day || S.day.date !== t) { S.day = { date: t, ticks: [], mine: [] }; save('day'); }
   if (!S.floor || S.floor.date !== t) { S.floor = { date: t, people: [] }; save('floor'); }
   const cur = curShiftKey();
-  if (!S.shift || !S.shift.key) { S.shift = { key: cur, notes: [], f: {}, sentAt: null }; save('shift'); }
-  else if (S.shift.key !== cur && (!S.shift.notes.length || S.shift.sentAt)) { S.shift = { key: cur, notes: [], f: {}, sentAt: null }; save('shift'); }
+  if (!S.shift || !S.shift.key) { S.shift = { key: cur, notes: [], f: {}, sentAt: null, held: (S.shift && S.shift.held) || [] }; save('shift'); }
+  else if (S.shift.key !== cur) {
+    const held = (S.shift.held || []).filter((h) => !h.sentAt && h.notes && h.notes.length);
+    if (S.shift.notes.length && !S.shift.sentAt) held.push({ key: S.shift.key, notes: S.shift.notes, f: S.shift.f || {}, sentAt: null });
+    S.shift = { key: cur, notes: [], f: {}, sentAt: null, held, draft: S.shift.draft || '' };
+    save('shift');
+  }
   // Message drafts marked daily expire overnight.
   let changed = false;
   for (const [k, v] of Object.entries(S.msgs || {})) { if (v && v.__daily && v.__day !== t) { delete S.msgs[k]; changed = true; } }

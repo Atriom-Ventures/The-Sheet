@@ -24,7 +24,8 @@ function step(label, cmd, args, opts = {}) {
 const node = process.execPath;
 // Sync runs in three time zones, including the two furthest from UTC, to catch date bugs.
 for (const tz of ['UTC', 'Pacific/Kiritimati', 'Pacific/Pago_Pago']) step('Sync, ' + tz, node, [path.join(HERE, 'sync.test.mjs')], { env: { TZ: tz } });
-step('Order amounts, shared text', node, [path.join(HERE, 'count.test.mjs')]);
+step('Count: order amounts, units, A to Z', node, [path.join(HERE, 'count.test.mjs')]);
+step('Shift notes: held, never blocked', node, [path.join(HERE, 'notes.test.mjs')]);
 step('Saves when the app goes to the background', node, [path.join(HERE, 'background.test.mjs')]);
 step('Backups leave out daily and personal data', node, [path.join(HERE, 'backup.test.mjs')]);
 step('Offline files; nothing loaded from outside', node, [path.join(HERE, 'offline.test.mjs')]);

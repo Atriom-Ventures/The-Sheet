@@ -176,7 +176,7 @@ export const TEMPLATES = [
   { id: 'shout', kicker: 'To the team', title: 'Shout-outs', daily: true, blurb: 'Thank people by name for exactly what they did. Specific praise lands harder than “great job, team.”',
     defaults: () => ({ opener: 'Shout-outs from today’s shift', rows: [{ name: '', did: '' }, { name: '', did: '' }], closing: 'Thank you all.' }), newRow: () => ({ name: '', did: '' }), form: shoutForm, build: shoutBuild },
   { id: 'incident', kicker: 'Facts first', title: 'Incident note', daily: true, blurb: 'Write it down while it’s fresh: what happened, who helped, what was done and what’s next.',
-    note: 'Room or table instead of resident names in group chats. Send health details to the care team or your manager directly. This draft is gone tomorrow.',
+    note: 'Room or table instead of resident names in group chats. Send health details to the care team or your manager directly.',
     fields: () => [
       { k: 'date', label: 'Date', type: 'date', half: true }, { k: 'time', label: 'Time', type: 'time', half: true },
       { k: 'where', label: 'Where', type: 'select', options: (B().outlets || []).concat(['Kitchen', 'Hallway', 'Other']) },
@@ -219,7 +219,7 @@ export function openTmpl(id) {
   cur = { T, v: loadVals(T) };
   openSheet({
     eyebrow: T.kicker, title: T.title,
-    body: (T.note ? '<p class="note">' + esc(T.note) + '</p>' : '') + '<div id="tmpl-form">' + T.form(cur.v) + '</div><div class="preview"><span class="lbl">Preview</span><pre class="chit" id="chit"></pre></div>',
+    body: '<p class="save-state">' + ICON.note + '<span>Saved on this phone as you type. Nothing is sent until you copy or share it. ' + (T.daily ? '<b>This draft is gone tomorrow.</b>' : 'Kept until you tap Clear.') + '</span></p>' + (T.note ? '<p class="note">' + esc(T.note) + '</p>' : '') + '<div id="tmpl-form">' + T.form(cur.v) + '</div><div class="preview"><span class="lbl">Preview</span><pre class="chit" id="chit"></pre></div>',
     foot: '<button class="btn ghost" data-act="tmpl-reset">Clear</button><button class="btn ghost" data-act="tmpl-share" aria-label="Share">' + ICON.share + '</button><button class="btn primary" data-act="tmpl-copy">' + ICON.copy + ' Copy' + (B().messaging ? ' for ' + esc(B().messaging) : '') + '</button>',
     onMount: () => update(false), onClose: () => { cur = null; }
   });

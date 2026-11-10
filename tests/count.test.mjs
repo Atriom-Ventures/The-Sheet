@@ -79,4 +79,118 @@ for (const [name, h] of Object.entries(screens)) {
   check(!raw && !/Something went wrong/.test(h), name + ': shown as text' + (raw ? ' (' + raw + ' place' + (raw === 1 ? '' : 's') + ' put it in as markup)' : ''));
 }
 
+/* ---------- 4 to 7: added in 1.6 ---------- */
+const countHTML = (P) => P.count.render({ sub: 'count' });
+const bands = (h) => Array.from(h.matchAll(/<h2 class="band">([^<]*)<\/h2>/g)).map((m) => m[1]);
+const linesIn = (h) => Array.from(h.matchAll(/<h3 class="lname">([^<]*)<\/h3>/g)).map((m) => unesc(m[1]));
+const fresh = async (name, change) => {
+  const inv = fixture('inventory.json'); if (change) change(inv);
+  const st = invPhone();
+  return phone(name, Object.assign(st, { inv: slot(inv), count: { id: 'c', started: nowIso, counts: {}, orders: {} } }));
+};
+
+console.log('\n4. Sections and lines show A to Z');
+{
+  const A = await fresh('Az', (inv) => {
+    // The file has Paper goods, Coffee and tea, Cleaning, in that order.
+    inv.lines.push({ id: 'ln-z8', cat: 'paper', name: '8 oz bowls', unit: 'sleeve', step: 1, par: 1, state: 'active', products: [{ id: 'p-z8', name: '' }] });
+    inv.lines.push({ id: 'ln-z12', cat: 'paper', name: '12 oz bowls', unit: 'sleeve', step: 1, par: 1, state: 'active', products: [{ id: 'p-z12', name: '' }] });
+    inv.lines.push({ id: 'ln-lost', cat: 'gone-section', name: 'Stray item', unit: 'each', step: 1, par: 1, state: 'active', products: [{ id: 'p-lost', name: '' }] });
+  });
+  const h = countHTML(A), b = bands(h);
+  check(JSON.stringify(b.slice(0, 3)) === JSON.stringify(['Cleaning', 'Coffee and tea', 'Paper goods']), 'sections A to Z, whatever order the file has: ' + b.join(', '));
+  check(b[b.length - 1] === 'No section' && linesIn(h).includes('Stray item'), 'a line whose section is gone still shows, under "No section"');
+  const paper = linesIn(h.slice(h.indexOf('>Paper goods<'), h.indexOf('>No section<')));
+  check(paper.indexOf('8 oz bowls') < paper.indexOf('12 oz bowls') && paper.indexOf('12 oz bowls') < paper.indexOf('Cup lids'), 'lines A to Z, numbers in order (8 oz before 12 oz): ' + paper.join(', '));
+  const items = A.count.render({ sub: 'items' });
+  check(bands(items).join(',').startsWith('Cleaning,Coffee and tea,Paper goods'), 'Items uses the same order');
+  const msgOrder = orderMsg(A); // nothing counted yet: the not-counted list is in the same order too
+  check(msgOrder.indexOf('8 oz bowls') < msgOrder.indexOf('12 oz bowls'), 'the order message lists lines in the same order');
+}
+
+console.log('\n5. Full cases and loose units, counted separately');
+{
+  const C5 = await fresh('Split', (inv) => { const n = inv.lines.find((l) => l.id === 'ln-napkins'); n.unit = 'case'; n.step = 1; n.par = 3; n.products[0].perCase = 20; });
+  const h = countHTML(C5);
+  check(/id="qc-p-napkins"/.test(h) && /id="ql-p-napkins"/.test(h) && /loose sleeves/.test(h), 'a line counted in cases with 20 a case gets a cases box and a loose-sleeves box');
+  check(!/\+1 case/.test(h), 'no "+1 case" button (on a line counted in cases it used to add 20 cases)');
+  for (let i = 0; i < 2; i++) C5.act('inv-split', { pid: 'p-napkins', part: 'c', d: '1' });
+  for (let i = 0; i < 7; i++) C5.act('inv-split', { pid: 'p-napkins', part: 'l', d: '1' });
+  check(Math.abs(C5.S.count.counts['p-napkins'] - 2.35) < 1e-9, '2 cases + 7 sleeves is stored as 2.35 cases: ' + C5.S.count.counts['p-napkins']);
+  check(/have 2 cases \+ 7 sleeves/.test(lineOf(C5, 'Napkins')), 'the order shows what’s on hand as "2 cases + 7 sleeves": ' + lineOf(C5, 'Napkins'));
+  C5.type({ split: 'l', pid: 'p-napkins' }, '19', 'change');
+  check(Math.abs(C5.S.count.counts['p-napkins'] - 2.95) < 1e-9, 'typing 19 in the loose box keeps the 2 cases: ' + C5.S.count.counts['p-napkins']);
+  C5.type({ split: 'c', pid: 'p-napkins' }, '', 'change');
+  check(Math.abs(C5.S.count.counts['p-napkins'] - 0.95) < 1e-9, 'emptying the cases box leaves just the loose ones');
+  C5.type({ split: 'l', pid: 'p-napkins' }, '', 'change');
+  check(C5.S.count.counts['p-napkins'] == null, 'both boxes empty means not counted');
+  // A line counted in sleeves with a per-case number: the cases box adds a whole case of sleeves.
+  C5.act('inv-split', { pid: 'p-cups', part: 'c', d: '1' });
+  C5.act('inv-split', { pid: 'p-cups', part: 'l', d: '1' });
+  check(C5.S.count.counts['p-cups'] === 21, 'on a line counted in sleeves (20 a case), 1 case + 1 sleeve = 21 sleeves: ' + C5.S.count.counts['p-cups']);
+  C5.act('inv-split', { pid: 'p-cups', part: 'l', d: '-1' }); C5.act('inv-split', { pid: 'p-cups', part: 'l', d: '-1' });
+  check(C5.S.count.counts['p-cups'] === 20, 'minus never goes below zero in the loose box');
+  // One that divides unevenly still adds back up exactly.
+  C5.st.edit('inv', (inv) => { inv.lines.find((l) => l.id === 'ln-napkins').products[0].perCase = 15; });
+  C5.act('inv-clear', { pid: 'p-napkins' });
+  for (let i = 0; i < 14; i++) C5.act('inv-split', { pid: 'p-napkins', part: 'l', d: '1' });
+  C5.act('inv-split', { pid: 'p-napkins', part: 'c', d: '1' });
+  check(/1 case \+ 14 sleeves/.test(orderMsg(C5)), '15 a case: 1 case + 14 sleeves shows back as that, not 1 case + 13.99');
+}
+
+console.log('\n6. Changing the unit converts instead of misreading');
+{
+  const C6 = await fresh('Unit', (inv) => { const n = inv.lines.find((l) => l.id === 'ln-napkins'); n.unit = 'case'; n.step = 1; n.par = 2; n.products[0].perCase = 20; });
+  C6.act('inv-split', { pid: 'p-napkins', part: 'c', d: '1' });
+  for (let i = 0; i < 3; i++) C6.act('inv-split', { pid: 'p-napkins', part: 'l', d: '1' });
+  const nap = () => C6.st.I().lines.find((l) => l.id === 'ln-napkins');
+  let msg = C6.count.changeUnit('ln-napkins', 'sleeve');
+  check(nap().unit === 'sleeve' && nap().par === 40 && C6.S.count.counts['p-napkins'] === 23, 'cases → sleeves: minimum 2 → 40, count 1.15 cases → 23 sleeves');
+  check(/Minimum 2 cases → 40 sleeves/.test(msg), 'and says so: ' + msg);
+  msg = C6.count.changeUnit('ln-napkins', 'case');
+  check(nap().unit === 'case' && nap().inner === 'sleeve' && nap().par === 2 && Math.abs(C6.S.count.counts['p-napkins'] - 1.15) < 1e-9, 'and back: minimum 2 cases, count 1.15, loose unit remembered as sleeves');
+  msg = C6.count.changeUnit('ln-napkins', 'box');
+  check(nap().par === 2 && C6.S.count.counts['p-napkins'] == null, 'cases → boxes has no conversion: the count is cleared, not misread, and the minimum kept');
+  check(/Check the minimum/.test(msg) && /count it again/.test(msg), 'and the message says to check the minimum and count again: ' + msg);
+  // The unit changed on the other phone and arrived by sync: converted on the next draw.
+  C6.st.edit('inv', (inv) => { const n = inv.lines.find((l) => l.id === 'ln-napkins'); n.unit = 'case'; n.inner = 'sleeve'; n.par = 2; });
+  C6.act('inv-split', { pid: 'p-napkins', part: 'c', d: '1' });
+  C6.st.edit('inv', (inv) => { const n = inv.lines.find((l) => l.id === 'ln-napkins'); n.unit = 'sleeve'; delete n.inner; n.par = 40; });
+  countHTML(C6);
+  check(C6.S.count.counts['p-napkins'] === 20, 'a unit change synced from another phone converts the count in progress (1 case → 20 sleeves)');
+  // A saved count remembers its unit, so "Same as last time" converts.
+  C6.act('count-save');
+  const saved = C6.st.C().history.slice(-1)[0];
+  check(saved.units && saved.units['p-napkins'] === 'sleeve', 'a saved count records the unit it was counted in');
+  C6.count.changeUnit('ln-napkins', 'case');
+  const h6 = countHTML(C6);
+  check(/data-act="inv-same" data-pid="p-napkins" data-val="1"/.test(h6), '"Same as last time" offers 1 case, not 20 cases');
+  // The Items list goes through the same path.
+  const pick = { dataset: { ie: 'unit', line: 'ln-napkins' }, tagName: 'SELECT', value: 'sleeve', classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {} };
+  C6.count.onInput(pick, { type: 'change' });
+  check(nap().unit === 'sleeve' && nap().par === 40, 'changing "Counted in" in Items converts the minimum too');
+}
+
+console.log('\n7. Sections can be added, renamed and deleted');
+{
+  const C7 = await fresh('Cats');
+  const realQ = document.querySelector;
+  const typeName = (v) => { document.querySelector = (s) => (s === '#cat-name' ? { value: v, focus() {} } : null); };
+  typeName('Frozen');
+  C7.act('cat-save', { id: '' });
+  const frozen = C7.st.I().cats.find((c) => c.name === 'Frozen');
+  check(!!frozen, 'a new section is added');
+  check(C7.count.render({ sub: 'items' }).includes('>Frozen<'), 'an empty section shows on Items, so lines can go in it');
+  check(!bands(countHTML(C7)).includes('Frozen'), 'but not on Count until it has a line');
+  typeName('Coffee, tea and cocoa');
+  C7.act('cat-save', { id: 'coffee' });
+  check(C7.st.I().cats.find((c) => c.id === 'coffee').name === 'Coffee, tea and cocoa' && C7.st.I().lines.filter((l) => l.cat === 'coffee').length === 4, 'renaming keeps every line in it');
+  document.querySelector = realQ;
+  const armedBtn = () => ({ dataset: { id: frozen.id, armed: '1' }, classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {}, getAttribute: () => null });
+  C7.count.acts['cat-del'](Object.assign(armedBtn(), { dataset: { id: 'paper', armed: '1' } }));
+  check(C7.st.I().cats.some((c) => c.id === 'paper'), 'a section with lines in it can’t be deleted');
+  C7.count.acts['cat-del'](armedBtn());
+  check(!C7.st.I().cats.some((c) => c.id === frozen.id), 'an empty one can');
+}
+
 T.done();

@@ -36,6 +36,7 @@ PAIRS = [
  ('muted','none-soft',4.5,'muted on tags'), ('plenty','surface',4.5,'plenty text'),
  ('ink','plenty-soft',4.5,'table numbers on maps'), ('band-text','surface',3,'table outlines on maps'), ('band-text','plenty-soft',3,'table outlines against their fill'), ('none','surface',3,'counter outlines on maps'),
  ('focus','plenty-soft',3,'selected table on maps'), ('ink','sunk',3,'walls against the map edge'), ('stop','surface',3,'closed-for-work hatching'),
+ ('ink','lamp-soft',4.5,'notes: not sent yet'), ('ink','go-soft',4.5,'notes: report sent'), ('lamp','surface',4.5,'notes card: not sent'), ('go','surface',4.5,'notes card: sent'), ('band-ink','band',3,'section rename and delete icons'), ('muted','surface',3,'unit chevron'),
 ]
 fails = 0
 for name, T in (('light', light), ('dark', dark)):

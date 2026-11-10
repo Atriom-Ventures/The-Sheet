@@ -103,7 +103,7 @@ function sheetView() {
   let h = '<p class="muted">The jobs on the daily assignment sheet. Pick yours on the Now screen, or print a blank sheet for the lead to fill in.</p>';
   h += seg('sheet-shift', [['am', 'AM'], ['pm', 'PM'], ['all', 'Everyone']], sheetShift);
   h += items.length ? '<ul class="tasks">' + items.map((a) => '<li class="task"><span class="stdrow"><span class="std-mark"></span><span class="t-text">' + withBlanks(a.text) + (a.time ? '<span class="t-meta"><span class="when mono">' + (a.by ? 'by ' : '') + fmt12(toMin(a.time)) + '</span></span>' : '') + '</span></span>' + howBtn(a.card) + (app.ui.editing ? '<button class="icon-b" data-act="asg-edit" data-id="' + esc(a.id) + '" aria-label="Edit">' + ICON.pencil + '</button>' : '') + '</li>').join('') + '</ul>' : empty('No jobs here yet.', true);
-  h += '<div class="row-actions">' + (app.ui.editing ? '<button class="btn small" data-act="asg-new" data-shift="' + sheetShift + '">' + ICON.plus + ' Add job</button>' : '') + '<button class="btn small ghost" data-act="pick">Pick my jobs</button><button class="btn small ghost" data-act="print" data-kind="sheet">' + ICON.print + ' Blank sheet</button></div>';
+  h += '<div class="row-actions">' + (app.ui.editing ? '<button class="btn small" data-act="asg-new" data-shift="' + sheetShift + '">' + ICON.plus + ' Add job</button>' : '') + (S.settings.showJobs ? '<button class="btn small ghost" data-act="pick">Pick my jobs</button>' : '') + '<button class="btn small ghost" data-act="print" data-kind="sheet">' + ICON.print + ' Blank sheet</button></div>';
   return h;
 }
 

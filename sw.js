@@ -1,7 +1,7 @@
 // Offline support. The app shell is cached on install; everything then runs with no connection.
 // GitHub API calls always go to the network and are never cached. Nothing else is fetched from outside the app.
 
-const VERSION = 'mt-1.7.0';
+const VERSION = 'mt-1.7.1';
 const SHELL_CACHE = 'mt-shell-' + VERSION;
 const SHELL = [
   './', './index.html', './app.css', './manifest.webmanifest',

@@ -203,4 +203,76 @@ check(/No allergen card yet/.test(N.card.cardView()) && N.card.printTarget() ===
 N.act('c3-start'); check(Array.isArray(N.doc().rows) && N.doc().rows.length === 0, 'an empty card can be started');
 { const m = await import(path.join(makePhone('CardM'), 'js/card3.js')); check(m.isCard(Object.assign({ type: 'the-sheet-card3' }, fixture('card3.json'))) && m.isCard(fixture('card3.json')) && !m.isCard(fixture('floorplans.json')) && !m.isCard(fixture('inventory.json')) && !m.isCard(fixture('book.json')), 'import knows a card file from the other kinds of file'); }
 
+console.log('\n6. A row saved over a newer copy, and lines the app can’t read');
+{
+  // Fill the row editor's fields from a row, the way the sheet shows them.
+  const fill = (r) => {
+    for (const k of Object.keys(fields)) delete fields[k];
+    Object.assign(fields, { 'c3-name': r.name || '', 'c3-kind': r.kind || 'dish', 'c3-short': r.short || '', 'c3-desc': r.desc || '', 'c3-check': r.check || '', 'c3-tail': r.tail || '', 'c3-packaged': r.packaged === true, 'c3-daily': r.daily === true, 'c3-veg': r.veg || '', 'c3-gf': r.gf || '', 'c3-df': r.df || '' });
+    (r.meals || []).forEach((m) => { fields['c3-m-' + m] = true; });
+    (r.allergens || []).forEach((e, i) => { fields['c3-e' + i + '-a'] = e.a; fields['c3-e' + i + '-s'] = e.s; ['from', 'list', 'sub'].forEach((k) => { fields['c3-e' + i + '-' + k] = e[k] || ''; }); });
+    boxes = (r.cross || []).map((id) => ({ checked: true, dataset: { x: id } }));
+  };
+  const row = (P, id) => P.doc().rows.find((r) => r.id === id);
+  // The row sheet is open on this phone when a sync brings in the other phone's change to the same row.
+  const R = await phone('CardR', withCard(clone(fixture('card3.json'))));
+  R.app.ui.editing = true;
+  R.act('c3-row', { id: 'm-pasta' });
+  fill(row(R, 'm-pasta')); fields['c3-desc'] = 'with parsley';                       // what this phone is changing
+  row(R, 'm-pasta').allergens.push({ a: 'sesame', s: 'in', from: 'the oil' });      // arrives by sync while the sheet is open
+  R.S.menu.local.kitchen.find((k) => k.id === 'fryer').carries.push('shellfish');
+  R.act('c3-row-save');
+  check(row(R, 'm-pasta').desc === 'with parsley' && row(R, 'm-pasta').allergens.some((e) => e.a === 'sesame'), 'saving a row that changed underneath (a sync came in while its sheet was open) keeps the allergen the other phone added: ' + row(R, 'm-pasta').allergens.map((e) => e.a).join(', '));
+  // Both changed the allergens: this phone took one off, the other phone added one.
+  R.act('c3-row', { id: 'm-burger' });
+  const mine = clone(row(R, 'm-burger')); mine.allergens = mine.allergens.filter((e) => e.a !== 'sesame');
+  R.act('c3-ent-del', { id: '3' });
+  fill(mine);
+  row(R, 'm-burger').allergens.push({ a: 'soy', s: 'ask', from: 'the bun' });
+  R.act('c3-row-save');
+  { const al = row(R, 'm-burger').allergens.map((e) => e.a);
+    check(al.includes('soy') && al.includes('sesame'), 'when both sides changed its allergens, every entry from both is kept: ' + al.join(', '));
+    check(/House Burger:<\/b> its allergens changed/.test(R.card.cardView()), '…and the card says to check that row'); }
+  // The same for shared equipment.
+  R.act('c3-clash-clear');
+  R.act('c3-kit', { id: 'fryer' });
+  for (const k of Object.keys(fields)) delete fields[k];
+  Object.assign(fields, { 'ck-title': 'Shared fryer', 'ck-text': 'Everything fried can carry fish and gluten.', 'ck-chip': 'FRYER', 'ck-foot': 'fish, gluten', 'ck-legend': 'Shared fryer: fish, gluten.', 'ck-list': 'Anything fried', 'ck-sub': 'shared fryer', 'ck-word': 'fried food' });
+  boxes = ['fish', 'gluten', 'shellfish'].map((a) => ({ checked: true, dataset: { c: a } }));
+  R.S.menu.local.kitchen.find((k) => k.id === 'fryer').carries.push('egg');          // arrives while the sheet is open
+  fields['ck-text'] = 'Everything fried can carry fish, gluten and shellfish.';
+  R.act('c3-kit-save', { id: 'fryer' });
+  check(R.S.menu.local.kitchen.find((k) => k.id === 'fryer').carries.includes('egg'), 'shared equipment saved over a newer copy keeps what the other phone said it carries');
+
+  // And for an allergen's "more to ask" lines.
+  R.act('c3-note', { id: 'fish' });
+  for (const k of Object.keys(fields)) delete fields[k];
+  Object.assign(fields, { 'cn-back': '', 'cn-ask': 'is there a clean pan?\nwhich oil?', 'cn-off': '', 'cn-menu': '' });
+  R.S.menu.local.notes.fish.ask.push('is the stock fish-based?');                     // arrives while the sheet is open
+  R.act('c3-note-save', { id: 'fish' });
+  check(['is there a clean pan?', 'which oil?', 'is the stock fish-based?'].every((q) => R.S.menu.local.notes.fish.ask.includes(q)), 'a note saved over a newer copy keeps both phones’ questions: ' + R.S.menu.local.notes.fish.ask.join(' / '));
+
+  // Lines the app can't read: a misspelled allergen or status, typed into the file.
+  const odd = clone(fixture('card3.json'));
+  odd.rows.find((r) => r.id === 'm-pasta').allergens[1] = { a: 'treenuts', s: 'in', from: 'walnut sauce' };
+  odd.kitchen.find((k) => k.id === 'fryer').carries = ['fish', 'glutten'];
+  odd.rows.push({ name: 'Peanut Noodles', kind: 'dish', meals: ['D'], allergens: [{ a: 'peanuts', s: 'in' }] });   // no id
+  const O = await phone('CardO', withCard(odd));
+  const ld = O.pages.pageHTML(O.doc(), 'LD');
+  check(/Check:<\/b>[^<]*can’t be read/.test(ld.split('Walnut Pasta')[1].split('c3-tr')[0]), 'a row with an allergen line the app can’t read prints with a Check note, not silently without it');
+  const iss = O.c3.issues(O.doc()).map((i) => i.text).join(' | ');
+  check(/Shared fryer/.test(iss) && /can’t read/.test(iss) && /no id/.test(iss), 'unreadable shared-equipment allergens and rows with no id are listed too: ' + iss);
+  for (const k of Object.keys(fields)) delete fields[k];
+  fields['cs-name'] = 'Pat'; fields['cs-date'] = '2026-01-12'; O.sure('c3-stamp-save');
+  check(!O.c3.isChecked(O.doc()), 'a card with lines the app can’t read can’t be marked kitchen checked');
+  O.app.ui.editing = true;
+  O.act('c3-row', { id: 'm-pasta' });
+  check(!/<option value="dairy" selected/.test(els['sheet-root'].innerHTML.split('Allergen 2')[1].split('Allergen 3')[0]) && /treenuts/.test(els['sheet-root'].innerHTML), 'the editor shows what the file says and doesn’t quietly pick Dairy');
+  fill(row(O, 'm-pasta')); fields['c3-e1-a'] = '';
+  O.act('c3-row-save');
+  check(row(O, 'm-pasta').allergens[1].a === 'treenuts', '…and won’t save the row until someone picks the allergen: ' + JSON.stringify(row(O, 'm-pasta').allergens[1]));
+  fields['c3-e1-a'] = 'nuts'; O.act('c3-row-save');
+  check(row(O, 'm-pasta').allergens[1].a === 'nuts' && row(O, 'm-pasta').allergens[1].s === 'in', 'picked → saved as Tree nuts, still “in it”');
+}
+
 T.done();

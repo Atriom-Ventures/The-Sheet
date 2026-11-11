@@ -193,4 +193,44 @@ console.log('\n7. Sections can be added, renamed and deleted');
   check(!C7.st.I().cats.some((c) => c.id === frozen.id), 'an empty one can');
 }
 
+console.log('\n8. A per-case number changed mid-count, and saved counts from before units were recorded');
+{
+  const C8 = await fresh('Per', (inv) => { const n = inv.lines.find((l) => l.id === 'ln-napkins'); n.unit = 'case'; n.step = 1; n.par = 3; n.products[0].perCase = 20; });
+  const perCase = (pid, n) => C8.st.edit('inv', (inv) => { for (const l of inv.lines) for (const p of l.products) if (p.id === pid) { if (n) p.perCase = n; else delete p.perCase; } });
+  const boxes = (pid) => { const h = countHTML(C8); return [(/id="qc-[^"]*"[^>]*value="([^"]*)"/.exec(h.split('id="P-' + pid + '"')[1]) || [])[1], (/id="ql-[^"]*"[^>]*value="([^"]*)"/.exec(h.split('id="P-' + pid + '"')[1]) || [])[1]].join(' + '); };
+  // Counted in cases: 1 case and 6 loose sleeves, at 20 a case.
+  C8.act('inv-split', { pid: 'p-napkins', part: 'c', d: '1' });
+  for (let i = 0; i < 6; i++) C8.act('inv-split', { pid: 'p-napkins', part: 'l', d: '1' });
+  check(boxes('p-napkins') === '1 + 6', '(setup: the boxes show 1 case + 6 sleeves)');
+  perCase('p-napkins', 12); // someone fixes the per-case number, here or on the other phone
+  check(boxes('p-napkins') === '1 + 6', 'the per-case number changes mid-count: the boxes still show the 1 case + 6 sleeves that were counted (they show ' + boxes('p-napkins') + ')');
+  check(Math.abs(C8.S.count.counts['p-napkins'] - 1.5) < 1e-9, '…stored as 1.5 cases now, not 1.3: ' + C8.S.count.counts['p-napkins']);
+  // Counted in sleeves with a per-case number: 2 cases and 3 loose, at 20 a case, is 43 sleeves.
+  for (let i = 0; i < 2; i++) C8.act('inv-split', { pid: 'p-cups', part: 'c', d: '1' });
+  for (let i = 0; i < 3; i++) C8.act('inv-split', { pid: 'p-cups', part: 'l', d: '1' });
+  perCase('p-cups', 10);
+  check(boxes('p-cups') === '2 + 3' && C8.S.count.counts['p-cups'] === 23, 'on a line counted in sleeves, 2 cases + 3 stays 2 cases + 3 (23 sleeves at 10 a case, not 43): ' + boxes('p-cups') + ', ' + C8.S.count.counts['p-cups']);
+  perCase('p-cups', 0); countHTML(C8);
+  check(C8.S.count.counts['p-cups'] === 23, 'taking the per-case number away leaves the count as it is, in sleeves');
+  perCase('p-cups', 10); countHTML(C8);
+  check(C8.S.count.counts['p-cups'] === 23, '…and putting one back doesn’t change it either');
+  // A saved count remembers the per-case number too, so "Same as last time" offers what was counted.
+  C8.act('count-save');
+  const saved = C8.st.C().history.slice(-1)[0];
+  check(saved.per && saved.per['p-cups'] === 10 && saved.per['p-napkins'] === 12, 'a saved count records each per-case number it was counted with');
+  perCase('p-cups', 20);
+  check(/data-act="inv-same" data-pid="p-cups" data-val="43"/.test(countHTML(C8)), '“Same as last time” after the per-case number changes offers the same 2 cases + 3 (43 sleeves at 20 a case)');
+
+  // Saved before 1.6: no units recorded. If the line has been changed since, the number can't be trusted.
+  const day = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+  const old = { schema: 1, updated: day(5), history: [{ id: 'h-old', date: day(5), savedAt: new Date(Date.now() - 5 * 864e5).toISOString(), by: 'AA', counts: { 'p-lids': 8, 'p-coffee': 2 }, orders: {}, orderCount: 0, text: 'x', updated: day(5) }] };
+  const inv = fixture('inventory.json');
+  inv.lines.find((l) => l.id === 'ln-lids').unit = 'case'; inv.lines.find((l) => l.id === 'ln-lids').updated = day(2);      // moved to cases after that count
+  inv.lines.find((l) => l.id === 'ln-coffee').updated = day(9);                                                                // not touched since
+  const G8 = await phone('Old', Object.assign(invPhone(), { inv: slot(inv), counts: slot(old), count: { id: 'c', started: nowIso, counts: {}, orders: {} } }));
+  const h8 = countHTML(G8);
+  check(!/data-act="inv-same" data-pid="p-lids"/.test(h8), 'a count saved before units were recorded isn’t offered as “Same as last time” on a line changed since (8 sleeves would read as 8 cases)');
+  check(/data-act="inv-same" data-pid="p-coffee" data-val="2"/.test(h8), '…and still is on a line nobody has changed since');
+}
+
 T.done();

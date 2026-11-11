@@ -95,32 +95,64 @@ function lastFor(pid) {
   const l = findLineOfProduct(pid), p = productOf(pid);
   for (const h of hist()) {
     if (!h.counts || h.counts[pid] == null) continue;
-    const v = Number(h.counts[pid]); if (!Number.isFinite(v)) return null;
+    let v = Number(h.counts[pid]); if (!Number.isFinite(v)) return null;
     const from = h.units && h.units[pid];
-    if (!l || !from || from === l.unit) return { val: v, date: h.date };
-    const f = factor(from, l.unit, smallUnit(l), perCaseOf(p));
-    return f == null ? null : { val: r6(v * f), date: h.date };
+    if (!l) return { val: v, date: h.date };
+    // Saved before units were recorded: the number is in whatever unit the line had then. If the line
+    // has been changed since (it may have moved from sleeves to cases), it can't be trusted, so it
+    // isn't offered. The next saved count records its units and the button comes back.
+    if (!from) return l.updated && String(l.updated).slice(0, 10) >= String(h.date || '').slice(0, 10) ? null : { val: v, date: h.date };
+    const n = perCaseOf(p), was = Number(h.per && h.per[pid]);
+    const f = factor(from, l.unit, smallUnit(l), n);
+    if (f == null) return null;
+    // Counted with a different per-case number: keep the cases and loose units that were counted.
+    if (was > 0 && n > 0 && was !== n) { const s = partsOf(from === 'case', was, v); return { val: fromParts(l.unit === 'case', n, s), date: h.date }; }
+    return { val: r6(v * f), date: h.date };
   }
   return null;
 }
+/* Full cases and loose units behind a number, and back, for a given per-case number. */
+function partsOf(inCases, n, v) {
+  const small = inCases ? v * n : v, c = Math.floor(small / n + 1e-6);
+  return { c, l: Math.max(0, round2(small - c * n)) };
+}
+const fromParts = (inCases, n, s) => r6(inCases ? s.c + s.l / n : s.c * n + s.l);
+/* What a count was made of when it was entered: the per-case number then, and the cases and loose
+   units it came to. `at` is the per-case number the stored count is worked out with right now. */
+function snapOf(line, p, v) {
+  const n = perCaseOf(p);
+  return n ? Object.assign({ n, at: n }, partsOf(line.unit === 'case', n, v)) : { n: 0, at: 0 };
+}
 /* A line's unit can change while a count is in progress, on this phone or synced from another phone.
    Each counted product remembers the unit it was counted in; numbers in an older unit are converted
-   with the per-case number, or cleared when that can't be done (so they're never misread). */
+   with the per-case number, or cleared when that can't be done (so they're never misread).
+   The per-case number can change mid-count too (someone corrects it). A count made as full cases plus
+   loose units is stored as one number, so a new per-case number would silently turn "1 case + 6" into
+   "1 case + 3.6". Each count remembers the cases and loose units it was entered as, and is worked out
+   again from those. */
 export function reconcileUnits() {
   const cnt = S.count; if (!cnt || !cnt.counts) return;
-  const u = cnt.units || (cnt.units = {});
+  const u = cnt.units || (cnt.units = {}), per = cnt.per || (cnt.per = {});
   let changed = false; const cleared = [];
   for (const pid of Object.keys(cnt.counts)) {
     const l = findLineOfProduct(pid);
     if (!l) continue;
-    if (!u[pid]) { u[pid] = l.unit; changed = true; continue; }
-    if (u[pid] === l.unit) continue;
-    const f = factor(u[pid], l.unit, smallUnit(l), perCaseOf(productOf(pid)));
-    if (f == null) { delete cnt.counts[pid]; delete u[pid]; if (cleared.indexOf(l.name) < 0) cleared.push(l.name); }
-    else { cnt.counts[pid] = r6(cnt.counts[pid] * f); u[pid] = l.unit; }
-    changed = true;
+    const p = productOf(pid), n = perCaseOf(p);
+    if (!u[pid]) { u[pid] = l.unit; changed = true; }
+    else if (u[pid] !== l.unit) {
+      const f = factor(u[pid], l.unit, smallUnit(l), n);
+      if (f == null) { delete cnt.counts[pid]; delete u[pid]; delete per[pid]; if (cleared.indexOf(l.name) < 0) cleared.push(l.name); changed = true; continue; }
+      cnt.counts[pid] = r6(cnt.counts[pid] * f); u[pid] = l.unit; changed = true;
+    }
+    const rec = per[pid];
+    if (!rec || typeof rec !== 'object') { per[pid] = snapOf(l, p, cnt.counts[pid]); changed = true; }
+    else if (rec.at !== n) {
+      if (n > 0 && rec.n > 0) cnt.counts[pid] = fromParts(l.unit === 'case', n, rec);
+      rec.at = n; changed = true;
+    }
   }
   for (const pid of Object.keys(u)) if (cnt.counts[pid] == null) { delete u[pid]; changed = true; }
+  for (const pid of Object.keys(per)) if (cnt.counts[pid] == null) { delete per[pid]; changed = true; }
   if (changed) save('count');
   if (cleared.length) setTimeout(() => toast(cleared.length === 1 ? 'How ' + cleared[0] + ' is counted changed, so its count was cleared. Count it again.' : cleared.length + ' lines changed how they’re counted, so their counts were cleared. Count them again.', 4000), 0);
 }
@@ -363,9 +395,9 @@ function countTab() {
 /* One count, in the line's unit. Remembers that unit so a later unit change can convert it. */
 function putCount(pid, val) {
   const l = findLineOfProduct(pid);
-  S.count.units = S.count.units || {};
-  if (val == null) { delete S.count.counts[pid]; delete S.count.units[pid]; }
-  else { S.count.counts[pid] = Math.max(0, val); if (l) S.count.units[pid] = l.unit; }
+  S.count.units = S.count.units || {}; S.count.per = S.count.per || {};
+  if (val == null) { delete S.count.counts[pid]; delete S.count.units[pid]; delete S.count.per[pid]; }
+  else { S.count.counts[pid] = Math.max(0, val); if (l) { S.count.units[pid] = l.unit; S.count.per[pid] = snapOf(l, productOf(pid), S.count.counts[pid]); } }
   save('count');
 }
 function setCount(pid, val, precise) {
@@ -618,7 +650,8 @@ export const acts = {
     if (!Object.keys(S.count.counts).length) { toast('Count something first.'); return; }
     const orderCount = r.order.filter((o) => o.qty > 0).length;
     const units = {}; Object.keys(S.count.counts).forEach((pid) => { const l = findLineOfProduct(pid); if (l) units[pid] = l.unit; });
-    const entry = { id: uid('h'), date: todayKey(), savedAt: new Date().toISOString(), by: whoAmI(), counts: Object.assign({}, S.count.counts), units, orders: Object.assign({}, S.count.orders), orderCount, text: orderText(r), updated: todayKey() };
+    const per = {}; Object.keys(units).forEach((pid) => { const n = perCaseOf(productOf(pid)); if (n) per[pid] = n; });
+    const entry = { id: uid('h'), date: todayKey(), savedAt: new Date().toISOString(), by: whoAmI(), counts: Object.assign({}, S.count.counts), units, per, orders: Object.assign({}, S.count.orders), orderCount, text: orderText(r), updated: todayKey() };
     if (orderCount) entry.order = { status: 'saved' };
     edit('counts', (c) => { c.history = (c.history || []).concat([entry]); });
     S.count = newCount(); save('count'); confirmNew = false;

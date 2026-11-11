@@ -76,9 +76,11 @@ function back(doc) {
 
 /* ---------- expo pages: the menus, A to Z ---------- */
 const mark = (v, label) => '<div class="c3-mk"><span class="c3-mark' + (v === 'yes' ? ' yes' : '') + '"' + (v ? ' aria-label="' + label + (v === 'yes' ? ': yes' : v === 'opt' ? ': option' : ': ' + v + ' only') + '"' : '') + '>' + (v === 'yes' ? TICK : v === 'opt' ? 'OPT' : esc(v)) + '</span></div>';
-const piece = (p) => '<span class="c3-piece"><span>' + esc(p.name || 'Missing row') + (p.mark ? ' <b class="mono">' + esc(p.mark) + '</b>' : '') + '</span>' + chips(p) + '</span>';
+// A line the app can't read isn't shown as a chip, so the row says so instead of looking complete.
+const UNREAD = '<span class="c3-grey"><b class="amb">Check:</b> an allergen line can’t be read</span>';
+const piece = (p) => '<span class="c3-piece"><span>' + esc(p.name || 'Missing row') + (p.mark ? ' <b class="mono">' + esc(p.mark) + '</b>' : '') + '</span>' + chips(p) + (p.bad ? UNREAD : '') + '</span>';
 function alCell(r) {
-  const inner = chips(r) + r.parts.map(piece).join('') + (r.packaged ? '<span class="c3-grey">label</span>' : '') + (r.tail ? '<span class="c3-grey">' + esc(r.tail) + '</span>' : '');
+  const inner = chips(r) + (r.bad ? UNREAD : '') + r.parts.map(piece).join('') + (r.packaged ? '<span class="c3-grey">label</span>' : '') + (r.tail ? '<span class="c3-grey">' + esc(r.tail) + '</span>' : '');
   return '<div class="c3-chips">' + (inner || '<span class="c3-grey">none listed</span>') + '</div>';
 }
 function menu(doc, which) {

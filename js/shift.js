@@ -4,7 +4,7 @@
 import { app } from './app.js';
 import { S, B, save, curShiftKey, isTicked, tasksOf, blocks, pmStart, sign, signName, rollDay } from './state.js';
 import { esc, fmt12, toMin, hhmmNow, nowMin, fmtDateKey, uid, $, copyText, shareText } from './util.js';
-import { ICON, openSheet, closeSheet, toast, chip, seg, opts, armed } from './ui.js';
+import { ICON, openSheet, closeSheet, setSheetTitle, toast, chip, seg, opts, armed } from './ui.js';
 
 export const NOTE_TAGS = [
   ['next', 'Next shift', 'Next shift needs to know', 'What the next shift needs to know'],
@@ -23,7 +23,7 @@ const unsentHeld = () => held().filter((h) => !h.sentAt);
 const sentLine = (rec) => (rec.sentHow === 'shared' ? 'Report shared at ' : 'Report copied at ') + fmt12(toMin(rec.sentAt));
 const tempNum = (v) => { const n = parseFloat(v); return isNaN(n) ? null : Math.round(n * 10) / 10; };
 
-let ui = null; // { seg, tag }
+let ui = null; // { seg, tag, key }: key is the shift the sheet was drawn for
 
 function checklistStatus() {
   const sh = String(S.shift.key || '').split('|')[1] || 'AM', pm = pmStart(), t = nowMin();
@@ -96,7 +96,7 @@ function heldHTML() {
     return '<section class="held"><div class="row-h"><h3 class="sec-h">' + esc(keyLabel(h.key)) + '</h3><span class="mono cnt">' + h.notes.length + (h.notes.length === 1 ? ' note' : ' notes') + '</span></div>' +
       (h.sentAt ? '<p class="save-state sent">' + ICON.check + '<span><b>' + esc(sentLine(h)) + '.</b> Clears when the next shift starts.</span></p>' : '') +
       '<ul class="tasks">' + noteRows(h, false) + '</ul>' +
-      '<div class="row-actions"><button class="btn small primary" data-act="held-copy" data-i="' + i + '">' + ICON.copy + ' Copy report</button><button class="btn small ghost" data-act="held-share" data-i="' + i + '">' + ICON.share + ' Share</button><button class="btn small danger" data-act="held-del" data-i="' + i + '">' + ICON.trash + ' Delete</button></div></section>';
+      '<div class="row-actions"><button class="btn small primary" data-act="held-copy" data-i="' + i + '" data-k="' + esc(h.key) + '">' + ICON.copy + ' Copy report</button><button class="btn small ghost" data-act="held-share" data-i="' + i + '" data-k="' + esc(h.key) + '">' + ICON.share + ' Share</button><button class="btn small danger" data-act="held-del" data-i="' + i + '" data-k="' + esc(h.key) + '">' + ICON.trash + ' Delete</button></div></section>';
   }).join('');
 }
 function body() {
@@ -137,7 +137,7 @@ const foot = () => (ui && ui.seg === 'earlier') ? '<button class="btn primary" d
 function redrawFoot() { const f = $('#sheet-f'); if (f && ui) f.innerHTML = foot(); }
 export function openNotes(segName) {
   rollDay();
-  ui = { seg: segName || 'notes', tag: (S.settings.noteTag) || 'next' };
+  ui = { seg: segName || 'notes', tag: (S.settings.noteTag) || 'next', key: S.shift.key };
   openSheet({
     eyebrow: 'Shift notes', title: keyLabel(S.shift.key),
     body: '<div id="notes-body">' + body() + '</div>',
@@ -145,6 +145,28 @@ export function openNotes(segName) {
     onMount: () => { if (ui.seg === 'report') { const c = $('#rep-chit'); if (c) c.textContent = reportText(); } else if (ui.seg === 'notes') { const x = $('#note-text'); if (x) try { x.focus({ preventScroll: true }); } catch (e) { /* ignore */ } } },
     onClose: () => { const kept = keepDraft(); ui = null; app.render(); if (kept) toast('Your unfinished note was added. Saved on this phone.'); }
   });
+}
+/* The sheet shows the shift it was opened on. If the shift changes while it's open (the phone was locked
+   across the change, or left open past midnight), the notes on screen have moved under Earlier and the
+   buttons would act on the new, empty shift: Copy report would copy "nothing to hand off" and mark it
+   sent. So every tap checks first. If the shift has moved on, the sheet is redrawn for the new one,
+   says so, and that tap does nothing else. */
+function movedOn() {
+  rollDay();
+  if (!ui || ui.key === S.shift.key) return false;
+  ui.key = S.shift.key;
+  const k = unsentHeld().length;
+  if (k) ui.seg = 'earlier';
+  setSheetTitle(keyLabel(S.shift.key));
+  redraw(); redrawFoot();
+  toast(k ? 'A new shift has started. The earlier notes are here, not sent yet.' : 'A new shift has started.');
+  return true;
+}
+/* The held shift a button was drawn for: by its shift, not its place in a list that may have changed. */
+function heldFor(el) {
+  const list = held(), at = list[+el.dataset.i], k = el.dataset.k;
+  if (k == null) return at || null;
+  return at && at.key === k ? at : (list.find((h) => h.key === k && !h.sentAt) || list.find((h) => h.key === k) || null);
 }
 /* Text typed but not added yet is added as a note when the sheet closes, so nothing typed is lost. */
 function keepDraft() {
@@ -171,8 +193,8 @@ export function notesCard() {
   return h;
 }
 
-async function sendHeld(i, how) {
-  const h = held()[i]; if (!h) return;
+async function sendHeld(el, how) {
+  const h = heldFor(el); if (!h) { redraw(); redrawFoot(); toast('Those notes aren’t here anymore.'); return; }
   const text = reportText(h);
   let r;
   if (how === 'share') r = await shareText(text, 'Shift report'); else r = (await copyText(text)) ? 'copied' : 'failed';
@@ -182,24 +204,26 @@ async function sendHeld(i, how) {
 
 export const acts = {
   'notes': (el) => openNotes(el.dataset.seg),
-  'notes-seg': (el) => { ui.seg = el.dataset.id; redraw(true); redrawFoot(); },
+  'notes-seg': (el) => { if (movedOn()) return; ui.seg = el.dataset.id; redraw(true); redrawFoot(); },
   'note-tag': (el) => { ui.tag = el.dataset.id; S.settings.noteTag = ui.tag; save('settings'); redraw(true); },
   'note-add': () => {
     const x = $('#note-text'); if (!x) return;
+    const moved = movedOn(); // a note typed across a shift change goes into the shift that's on now
     const text = x.value.trim().replace(/\s*\n\s*/g, ' ');
     if (!text) { toast('Type the note first.'); x.focus(); return; }
     addNote(text, ui.tag); x.value = '';
+    if (moved) { ui.seg = 'notes'; redrawFoot(); }
     redraw(true);
-    toast('Note saved on this phone.');
+    toast(moved ? 'A new shift has started: the note was saved to it. Earlier notes are under Earlier.' : 'Note saved on this phone.');
   },
-  'note-del': (el) => { S.shift.notes = S.shift.notes.filter((n) => n.id !== el.dataset.id); save('shift'); redraw(); },
-  'notes-copy': async () => { if (await copyText(reportText())) { markSent(S.shift, 'copied'); toast('Report copied. Paste it into ' + (B().messaging || 'your team chat') + '.'); redraw(); } else toast('Couldn’t copy. Long-press the preview to copy it.'); },
-  'notes-share': async () => { const r = await shareText(reportText(), 'Shift report'); if (r === 'shared' || r === 'copied') { markSent(S.shift, r); toast(r === 'copied' ? 'Report copied.' : 'Report shared.'); redraw(); } },
-  'held-copy': (el) => sendHeld(+el.dataset.i, 'copy'),
-  'held-share': (el) => sendHeld(+el.dataset.i, 'share'),
+  'note-del': (el) => { if (movedOn()) return; S.shift.notes = S.shift.notes.filter((n) => n.id !== el.dataset.id); save('shift'); redraw(); },
+  'notes-copy': async () => { if (movedOn()) return; if (await copyText(reportText())) { markSent(S.shift, 'copied'); toast('Report copied. Paste it into ' + (B().messaging || 'your team chat') + '.'); redraw(); } else toast('Couldn’t copy. Long-press the preview to copy it.'); },
+  'notes-share': async () => { if (movedOn()) return; const r = await shareText(reportText(), 'Shift report'); if (r === 'shared' || r === 'copied') { markSent(S.shift, r); toast(r === 'copied' ? 'Report copied.' : 'Report shared.'); redraw(); } },
+  'held-copy': (el) => sendHeld(el, 'copy'),
+  'held-share': (el) => sendHeld(el, 'share'),
   'held-del': (el) => {
     if (!armed(el, 'Delete these notes?')) return;
-    const h = held()[+el.dataset.i]; if (!h) return;
+    const h = heldFor(el); if (!h) return;
     S.shift.held = held().filter((x) => x !== h); save('shift');
     redraw(); redrawFoot(); toast('Deleted from this phone.');
   }

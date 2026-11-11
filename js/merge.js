@@ -14,6 +14,7 @@ import { same, clone } from './util.js';
 let PREFER = 'phone'; // 'remote' on a first sync with a repo, or when this phone can't send: GitHub's copy wins differences
 let NOTE = '';
 let KEPT = new Set(); // ids a deletion clash kept, so their deletion markers are lifted
+let JOIN = null; // (path) => true for lists where a clash keeps both sides' entries (see mergeDoc)
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const isIdArray = (a) => Array.isArray(a) && a.length > 0 && a.every((x) => isObj(x) && typeof x.id === 'string');
@@ -27,6 +28,14 @@ function mergeValue(base, local, remote, path, conflicts) {
     return mergeArrays(base || [], local || [], remote || [], path, conflicts);
   }
   if (isObj(local) && isObj(remote)) return mergeObjects(isObj(base) ? base : {}, local, remote, path, conflicts);
+  if (JOIN && JOIN(path) && [base, local, remote].every((v) => v == null || Array.isArray(v))) {
+    // Some lists are too important to pick a side on (what a dish has in it). Keep every entry either
+    // side has, even one the other side took off, and say so: a person decides, not the merge.
+    const out = clone(local || []);
+    (remote || []).forEach((x) => { if (!out.some((y) => same(x, y))) out.push(clone(x)); });
+    conflicts.push({ path, kept: 'both', theirs: clone(remote), ours: clone(local), note: 'Changed on both: every entry from both was kept' });
+    return out;
+  }
   if (PREFER === 'remote') { conflicts.push({ path, kept: 'github', theirs: clone(remote), ours: clone(local), note: NOTE || 'First sync with this repo: GitHub’s version kept' }); return clone(remote); }
   conflicts.push({ path, kept: 'phone', theirs: clone(remote), ours: clone(local) });
   return clone(local);
@@ -147,6 +156,7 @@ export function mergeDoc(base, local, remote, opts) {
   PREFER = opts && opts.prefer === 'remote' ? 'remote' : 'phone';
   NOTE = (opts && opts.note) || '';
   KEPT = new Set();
+  JOIN = opts && typeof opts.join === 'function' ? opts.join : null;
   try {
     const marks = isObj(local) && isObj(remote) ? mergeGone(base, local, remote) : null;
     const doc = mergeValue(base == null ? {} : withoutGone(base), withoutGone(local), withoutGone(remote), '', conflicts);
@@ -155,7 +165,7 @@ export function mergeDoc(base, local, remote, opts) {
       if (Object.keys(marks).length) { doc[GONE] = marks; dropGone(doc); }
     }
     return { doc, conflicts };
-  } finally { PREFER = 'phone'; NOTE = ''; KEPT = new Set(); }
+  } finally { PREFER = 'phone'; NOTE = ''; KEPT = new Set(); JOIN = null; }
 }
 
 /* Paths in merge notes look like .lines[ln_x].products[p_y].par: a field after a dot, an item id in

@@ -30,6 +30,8 @@ step('Saves when the app goes to the background', node, [path.join(HERE, 'backgr
 step('Backups leave out daily and personal data', node, [path.join(HERE, 'backup.test.mjs')]);
 step('Offline files; nothing loaded from outside', node, [path.join(HERE, 'offline.test.mjs')]);
 step('Floor plans', node, [path.join(HERE, 'maps.test.mjs')]);
+step('Allergen card: pages from rows, kitchen check', node, [path.join(HERE, 'card.test.mjs')]);
+step('Allergen card fits Letter (real browser)', 'python3', [path.join(HERE, 'card-fit.py')]);
 step('Every screen draws', node, [path.join(HERE, 'shell.test.mjs')]);
 step('Tap-twice confirm', node, [path.join(HERE, 'confirm.test.mjs')]);
 const r = step('Draw screens for the markup check', node, [path.join(HERE, 'a11y', 'render.mjs')], { capture: true });
@@ -38,7 +40,7 @@ if (drawn) step('Markup (labels, names, headings)', 'python3', [path.join(HERE, 
 step('Color contrast', 'python3', [path.join(HERE, 'a11y', 'contrast.py')]);
 
 console.log('\n\n######## Summary');
-for (const [label, status] of results) console.log((status === 'FAILED' ? '  ✗ ' : status.startsWith('skipped') ? '  – ' : '  ✓ ') + label.padEnd(44) + status);
+for (const [label, status] of results) console.log((status === 'FAILED' ? '  ✗ ' : status.startsWith('skipped') ? '  – ' : '  ✓ ') + label.padEnd(48) + status);
 const failed = results.some(([, s]) => s === 'FAILED');
 if (failed) console.log('\nScratch files kept for a look: ' + out);
 else fs.rmSync(out, { recursive: true, force: true });

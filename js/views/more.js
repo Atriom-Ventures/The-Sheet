@@ -124,10 +124,13 @@ function phoneCard() {
     (full ? field('st-jobs', 'My jobs on Now', '<select id="st-jobs" data-setting="showJobs">' + opts([['false', 'Hidden'], ['true', 'Shown']], String(!!s.showJobs)) + '</select>', 'Pick your jobs from the assignment sheet', 'half') : '') +
     '</div><p class="hint">Storage: ' + esc(ps) + '</p>' + (full ? '<div class="row-actions"><button class="btn small ghost" data-act="go" data-id="#quick">' + ICON.grid + ' Open quick view</button></div>' : '') + '</section>';
 }
+/* A link in the book opens only if it's a web address. Anything else in that field (the file can be
+   edited by hand) is shown as plain words. */
+const webLink = (u) => /^https?:\/\/\S+$/i.test(String(u == null ? '' : u).trim());
 function linksCard() {
   const links = (B().links || []);
   if (!links.length) return '';
-  return '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.link + ' Links</h2></div><ul class="plain-list links">' + links.map((l) => '<li><a href="' + esc(l.url) + '" target="_blank" rel="noopener">' + esc(l.label) + '</a></li>').join('') + '</ul><p class="hint">These open in the browser and need a connection.</p></section>';
+  return '<section class="panel"><div class="row-h"><h2 class="sec-h">' + ICON.link + ' Links</h2></div><ul class="plain-list links">' + links.map((l) => (webLink(l.url) ? '<li><a href="' + esc(String(l.url).trim()) + '" target="_blank" rel="noopener">' + esc(l.label) + '</a></li>' : '<li>' + esc(l.label) + ' <span class="hint">(not a web address, so it isn’t a link)</span></li>')).join('') + '</ul><p class="hint">These open in the browser and need a connection.</p></section>';
 }
 function aboutCard() {
   const full = appMode() !== 'inv';

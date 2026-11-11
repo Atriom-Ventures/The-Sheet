@@ -33,6 +33,7 @@ step('Floor plans', node, [path.join(HERE, 'maps.test.mjs')]);
 step('Allergen card: pages from rows, kitchen check', node, [path.join(HERE, 'card.test.mjs')]);
 step('Allergen card fits Letter (real browser)', 'python3', [path.join(HERE, 'card-fit.py')]);
 step('Every screen draws', node, [path.join(HERE, 'shell.test.mjs')]);
+step('Markup in every shared value, on every screen', node, [path.join(HERE, 'everywhere.test.mjs')]);
 step('Tap-twice confirm', node, [path.join(HERE, 'confirm.test.mjs')]);
 const r = step('Draw screens for the markup check', node, [path.join(HERE, 'a11y', 'render.mjs')], { capture: true });
 const drawn = r && r.status === 0 ? r.stdout.trim().split('\n').pop() : null;

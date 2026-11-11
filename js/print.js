@@ -9,6 +9,9 @@ import * as maps from './views/maps.js';
 import * as c3 from './views/card.js';
 
 let stampText = '';
+/* The printed footer goes into a style rule as a quoted string. Names come from shared files, so quotes,
+   backslashes and line breaks (any of which would end the string early) are taken out. */
+export const stampCSS = (text) => '@page{@bottom-left{content:"' + String(text).replace(/["\\]/g, '').replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ') + '";font:8pt monospace;color:#444}}';
 const stamp = () => '<p class="pv-rev">' + esc(stampText) + '</p>';
 const blankPrint = (s) => esc(s).replace(/\[([^\]]{1,120})\]/g, '<span class="pv-blank">$1</span>');
 const staffLists = (drafts) => B().lists.filter((l) => (drafts || !l.draft) && tasksOf(l.id).length);
@@ -75,7 +78,7 @@ function go(t) {
   // The revision stamp goes in the page margin (Chrome supports page margin boxes) and under each section heading.
   let st = document.getElementById('print-stamp');
   if (!st) { st = document.createElement('style'); st.id = 'print-stamp'; document.head.appendChild(st); }
-  st.textContent = '@page{@bottom-left{content:"' + stampText.replace(/["\\]/g, '') + '";font:8pt monospace;color:#444}}';
+  st.textContent = stampCSS(stampText);
   root.innerHTML = build(t, info);
   document.body.classList.add('printing');
   const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); app.render(); };

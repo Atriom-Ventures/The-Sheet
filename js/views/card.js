@@ -5,10 +5,11 @@
 
 import { app } from '../app.js';
 import { M, S, edit, save, whoAmI, signName } from '../state.js';
-import { esc, uid, todayKey, clone, fmtRev, $, $$ } from '../util.js';
+import { esc, uid, todayKey, clone, same, fmtRev, $, $$ } from '../util.js';
 import { ICON, empty, openSheet, closeSheet, toast, armed, field, input, textarea, opts, chip } from '../ui.js';
-import { canWrite, connOf } from '../sync.js';
-import { ALLERGENS, STATUS, MEALS, MEAL_NAME, KINDS, MARKS, PAGES, rowsOf, kitchenOf, notesOf, stampOf, isChecked, setStamp, dropStaleStamp, fingerprint, issues, openCount, emptyCard } from '../card3.js';
+import { canWrite, connOf, trimNotes } from '../sync.js';
+import { mergeDoc } from '../merge.js';
+import { ALLERGENS, STATUS, MEALS, MEAL_NAME, KINDS, MARKS, PAGES, rowsOf, kitchenOf, notesOf, stampOf, isChecked, setStamp, dropStaleStamp, fingerprint, issues, blocking, openCount, emptyCard, MERGE } from '../card3.js';
 import { pageHTML, allPages, measure, loadFonts } from '../card3pages.js';
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -25,6 +26,22 @@ function editCard(fn) {
     fn(d);
     if (dropStaleStamp(d) && was) d.checkedBefore = { name: was.name, date: was.date };
   });
+}
+/* A sheet shows a copy of a row, and Save writes that copy back. If the row changed underneath while the
+   sheet was open (a sync brought in another phone's edit), writing the copy back whole would undo that
+   edit, and could take an allergen off the card with nothing to show for it. So the save is merged with
+   what's there now, by the same rules as a sync: allergen lists keep every entry from both, and the
+   card says which rows to check.
+   `wrap` puts one item where it lives in the file, so merge notes carry the usual paths. */
+function saveOver(wrap, base, mine, cur) {
+  if (base == null || cur == null || same(cur, base)) return wrap(mine);
+  const m = mergeDoc(wrap(base), wrap(mine), wrap(cur), MERGE);
+  if (m.conflicts.length) {
+    const at = new Date().toISOString();
+    S.conflicts = trimNotes((S.conflicts || []).concat(m.conflicts.map((cf) => Object.assign({ id: uid('cf'), key: 'menu', file: 'card3.json', at, review: false, who: '' }, cf))));
+    save('conflicts');
+  }
+  return m.doc;
 }
 const rawRow = (id) => (Array.isArray(M().rows) ? M().rows.find((r) => isObj(r) && r.id === id) : null) || null;
 
@@ -89,7 +106,7 @@ function stateBox(d) {
 }
 /* Two phones changed the same row between syncs. Nothing was dropped from an allergen list, but a person
    should look: the notes stay here until someone taps Got it. */
-const FIELD = { allergens: 'allergens', cross: 'shared equipment marks', with: 'goes-out-with list', parts: 'choices' };
+const FIELD = { allergens: 'allergens', cross: 'shared equipment marks', with: 'goes-out-with list', parts: 'choices', veg: 'vegetarian mark', gf: 'gluten-free mark', df: 'dairy-free mark', name: 'name', meals: 'meals', kind: 'kind' };
 const clashes = () => (S.conflicts || []).filter((c) => isObj(c) && c.key === 'menu');
 function clashBox(rows) {
   const list = clashes();
@@ -99,6 +116,7 @@ function clashBox(rows) {
     const m = /^\.rows\[([^\]]*)\](?:\.([A-Za-z]+))?/.exec(str(c.path)), row = m ? byId.get(m[1]) : null;
     const what = m ? (row ? row.name || '(no name)' : 'A row that’s gone now') : 'The card’s other words or shared equipment';
     const text = c.kept === 'both' ? 'its ' + (FIELD[m && m[2]] || 'details') + ' changed on two phones at once. Everything from both was kept.'
+      : c.kept === 'neither' ? 'its ' + (FIELD[m && m[2]] || 'details') + ' changed on two phones at once, to different things. It was left blank: ask the kitchen which is right.'
       : 'changed on two phones at once. ' + (c.kept === 'github' ? 'The other phone’s' : 'This phone’s') + ' version' + (m && m[2] ? ' of its ' + (FIELD[m[2]] || 'details') : '') + ' was kept.';
     const k = what + '|' + text; if (seen.has(k)) return; seen.add(k);
     lines.push('<li><b>' + esc(what) + ':</b> ' + esc(text) + '</li>');
@@ -157,7 +175,8 @@ function scaleFrames() {
 if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('resize', scaleFrames);
 
 /* ---------- one row ---------- */
-let draft = null, isNew = false;
+let draft = null, draftBase = null, isNew = false;
+const known = (a) => ALLERGENS.some((x) => x.id === a);
 const val = (id) => { const el = $('#' + id); return el ? String(el.value || '').trim() : ''; };
 const on = (id) => { const el = $('#' + id); return !!(el && el.checked); };
 function refList(key, title, hint) {
@@ -187,7 +206,7 @@ function rowBody() {
   es.forEach((e, i) => {
     const o = isObj(e) ? e : {};
     h += '<div class="c3-ent"><div class="c3-ent-h"><b>Allergen ' + (i + 1) + '</b><button class="icon-b" data-act="c3-ent-del" data-id="' + i + '" aria-label="Remove allergen ' + (i + 1) + '">' + ICON.trash + '</button></div><div class="form">' +
-      field('c3-e' + i + '-a', 'Allergen', '<select id="c3-e' + i + '-a">' + opts(ALLERGENS.map((a) => [a.id, a.name]), o.a) + '</select>', '', 'half') +
+      field('c3-e' + i + '-a', 'Allergen', '<select id="c3-e' + i + '-a">' + (known(o.a) ? '' : '<option value="" selected>Pick one</option>') + opts(ALLERGENS.map((a) => [a.id, a.name]), o.a) + '</select>', known(o.a) ? '' : (str(o.a) ? 'The file says “' + str(o.a) + '”, which the app can’t read. ' : '') + 'Pick one to save the row.', 'half') +
       field('c3-e' + i + '-s', 'How sure', '<select id="c3-e' + i + '-s">' + opts(Object.entries(STATUS), STATUS[o.s] ? o.s : 'ask') + '</select>', '', 'half') +
       field('c3-e' + i + '-from', 'Comes from', input('c3-e' + i + '-from', str(o.from), 'autocomplete="off" maxlength="40"'), 'The ingredient, like cheese or the bun. It’s what the back page says to leave off or ask about.') +
       field('c3-e' + i + '-list', 'List on the back as', input('c3-e' + i + '-list', str(o.list), 'autocomplete="off" maxlength="40"'), 'Optional. Rows with the same words share a line.', 'half') +
@@ -213,7 +232,8 @@ function pull() {
   put('desc', val('c3-desc')); put('check', val('c3-check'));
   r.allergens = (Array.isArray(r.allergens) ? r.allergens : []).map((e, i) => {
     if (!$('#c3-e' + i + '-a')) return e;
-    const o = { a: val('c3-e' + i + '-a'), s: val('c3-e' + i + '-s') };
+    // A line nobody has picked an allergen for keeps what it had, so it can't turn into the first one on the list.
+    const o = { a: val('c3-e' + i + '-a') || (isObj(e) ? str(e.a) : ''), s: val('c3-e' + i + '-s') };
     ['from', 'list', 'sub'].forEach((k) => { const v = val('c3-e' + i + '-' + k); if (v) o[k] = v; });
     return o;
   });
@@ -222,7 +242,7 @@ function pull() {
   ['veg', 'gf', 'df'].forEach((k) => put(k, MARKS[val('c3-' + k)] ? val('c3-' + k) : ''));
 }
 function openRow(r, fresh) {
-  draft = clone(r); isNew = !!fresh;
+  draft = clone(r); draftBase = fresh ? null : clone(r); isNew = !!fresh;
   const view = roNow() || !app.ui.editing;
   if (view) {
     const n = rowsOf({ rows: [r] })[0], kitchen = kitchenOf(M());
@@ -235,12 +255,14 @@ function openRow(r, fresh) {
     });
     return;
   }
-  openSheet({ eyebrow: fresh ? 'New row' : 'Row', title: str(r.name) || 'New row', wide: true, body: rowBody(), foot: '<button class="btn primary" data-act="c3-row-save">Save</button>', onClose: () => { draft = null; } });
+  openSheet({ eyebrow: fresh ? 'New row' : 'Row', title: str(r.name) || 'New row', wide: true, body: rowBody(), foot: '<button class="btn primary" data-act="c3-row-save">Save</button>', onClose: () => { draft = null; draftBase = null; } });
 }
 const reSheet = () => { const b = $('#sheet-b'); if (b) b.innerHTML = rowBody(); };
 
 /* ---------- shared equipment, notes, the kitchen's check ---------- */
+let kitBase = null, noteBase;
 function kitSheet(k, fresh) {
+  kitBase = fresh ? null : clone(k);
   openSheet({
     eyebrow: 'Shared equipment', title: str(k.title) || 'New', wide: true,
     body: '<div class="form">' + field('ck-title', 'Name', input('ck-title', str(k.title), 'autocomplete="off" maxlength="30"'), 'Like “Shared fryer”') +
@@ -256,8 +278,10 @@ function kitSheet(k, fresh) {
     foot: '<button class="btn primary" data-act="c3-kit-save" data-id="' + esc(fresh ? '' : k.id) + '">Save</button>'
   });
 }
+const rawNote = (id) => { const n = M().notes; return isObj(n) && isObj(n[id]) ? n[id] : {}; };
 function noteSheet(a) {
   const n = notesOf(M(), a.id);
+  noteBase = { id: a.id, was: clone(rawNote(a.id)) };
   openSheet({
     eyebrow: 'Notes', title: a.name,
     body: '<div class="form">' + field('cn-back', 'A line for the back page', textarea('cn-back', n.back, 2, 'maxlength="140"'), 'Optional.') +
@@ -286,7 +310,7 @@ export const acts = {
   'c3-start': () => { if (ro()) return; edit('menu', (d) => { Object.assign(d, emptyCard(), { updated: d.updated }); }); app.ui.editing = true; app.renderView(); toast('Empty card started. Add a row.'); },
   'c3-row': (el) => { const r = rawRow(el.dataset.id); if (r) openRow(r, false); },
   'c3-row-new': () => { if (ro()) return; openRow({ id: uid('m'), name: '', kind: filter === 'extra' ? 'extra' : 'dish', meals: MEALS.includes(filter) ? [filter] : [], allergens: [] }, true); },
-  'c3-ent-add': () => { if (ro() || !draft) return; pull(); (draft.allergens = draft.allergens || []).push({ a: 'dairy', s: 'ask' }); reSheet(); const el = $('#c3-e' + (draft.allergens.length - 1) + '-a'); if (el) el.focus(); },
+  'c3-ent-add': () => { if (ro() || !draft) return; pull(); (draft.allergens = draft.allergens || []).push({ a: '', s: 'ask' }); reSheet(); const el = $('#c3-e' + (draft.allergens.length - 1) + '-a'); if (el) el.focus(); },
   'c3-ent-del': (el) => { if (ro() || !draft) return; pull(); draft.allergens.splice(+el.dataset.id, 1); reSheet(); },
   'c3-ref-add': (el) => {
     if (ro() || !draft) return;
@@ -301,9 +325,15 @@ export const acts = {
     if (ro() || !draft) return;
     pull();
     if (!draft.name) { toast('Give the row a name.'); const n = $('#c3-name'); if (n) { n.setAttribute('aria-invalid', 'true'); n.focus(); } return; }
-    const row = clone(draft); row.updated = todayKey(); const who = whoAmI(); if (who) row.by = who;
+    const unpicked = (Array.isArray(draft.allergens) ? draft.allergens : []).findIndex((e) => !isObj(e) || !known(e.a));
+    if (unpicked >= 0) { toast('Pick the allergen for line ' + (unpicked + 1) + ' first, or remove the line.'); const n = $('#c3-e' + unpicked + '-a'); if (n) { n.setAttribute('aria-invalid', 'true'); n.focus(); } return; }
+    const row = clone(draft), base = draftBase; row.updated = todayKey(); const who = whoAmI(); if (who) row.by = who;
     const before = isChecked(M());
-    editCard((d) => { d.rows = Array.isArray(d.rows) ? d.rows : []; const i = d.rows.findIndex((x) => isObj(x) && x.id === row.id); if (i >= 0) d.rows[i] = row; else d.rows.push(row); });
+    editCard((d) => {
+      d.rows = Array.isArray(d.rows) ? d.rows : [];
+      const i = d.rows.findIndex((x) => isObj(x) && x.id === row.id);
+      if (i >= 0) d.rows[i] = saveOver((x) => ({ rows: [x] }), base, row, d.rows[i]).rows[0]; else d.rows.push(row);
+    });
     closeSheet(); app.renderView();
     toast(before && !isChecked(M()) ? 'Saved. The card is a draft again until the kitchen checks it.' : 'Saved.');
   },
@@ -320,7 +350,8 @@ export const acts = {
     const k = { id: el.dataset.id || uid('k'), title: val('ck-title'), text: val('ck-text'), chip: val('ck-chip').toUpperCase(), foot: val('ck-foot'), legend: val('ck-legend'), carries: $$('#sheet-b input[data-c]').filter((x) => x.checked).map((x) => x.dataset.c), listAs: val('ck-list'), sub: val('ck-sub'), menuWord: val('ck-word') };
     if (!k.title) { toast('Give it a name.'); return; }
     Object.keys(k).forEach((key) => { if (k[key] === '') delete k[key]; });
-    editCard((d) => { d.kitchen = Array.isArray(d.kitchen) ? d.kitchen : []; const i = d.kitchen.findIndex((x) => isObj(x) && x.id === k.id); if (i >= 0) d.kitchen[i] = k; else d.kitchen.push(k); });
+    const base = kitBase && kitBase.id === k.id ? kitBase : null;
+    editCard((d) => { d.kitchen = Array.isArray(d.kitchen) ? d.kitchen : []; const i = d.kitchen.findIndex((x) => isObj(x) && x.id === k.id); if (i >= 0) d.kitchen[i] = saveOver((x) => ({ kitchen: [x] }), base, k, d.kitchen[i]).kitchen[0]; else d.kitchen.push(k); });
     closeSheet(); app.renderView(); toast('Saved.');
   },
   'c3-kit-del': (el) => {
@@ -335,7 +366,8 @@ export const acts = {
     const id = el.dataset.id; if (!ALLERGENS.some((a) => a.id === id)) return;
     const n = {}; const b = val('cn-back'), ask = val('cn-ask').split('\n').map((x) => x.trim()).filter(Boolean), off = val('cn-off'), menu = val('cn-menu');
     if (b) n.back = b; if (ask.length) n.ask = ask; if (off) n.off = off; if (menu) n.menu = menu;
-    editCard((d) => { d.notes = isObj(d.notes) ? d.notes : {}; if (Object.keys(n).length) d.notes[id] = n; else delete d.notes[id]; });
+    const base = noteBase && noteBase.id === id ? noteBase.was : null;
+    editCard((d) => { d.notes = isObj(d.notes) ? d.notes : {}; const out = saveOver((x) => ({ notes: { [id]: x } }), base, n, isObj(d.notes[id]) ? d.notes[id] : {}).notes[id]; if (isObj(out) && Object.keys(out).length) d.notes[id] = out; else delete d.notes[id]; });
     closeSheet(); app.renderView(); toast('Saved.');
   },
   'c3-clash-clear': () => { S.conflicts = (S.conflicts || []).filter((c) => !(isObj(c) && c.key === 'menu')); save('conflicts'); app.renderView(); },
@@ -346,6 +378,7 @@ export const acts = {
     if (!name) { toast('Add the name of whoever checked it.'); const n = $('#cs-name'); if (n) n.focus(); return; }
     if (!/^\d{4}-\d\d-\d\d$/.test(date) || date > todayKey()) { toast('Pick the day it was checked.'); return; }
     if (clashes().length) { toast('First check the rows flagged at the top of the card, then tap Got it.'); return; }
+    if (blocking(M()).length) { toast('First fix what’s listed under “Worth a look”: something in the file can’t be read, so it isn’t on the pages.'); return; }
     if (!armed(el, 'Tap again: the kitchen checked every line')) return;
     edit('menu', (d) => { delete d.checkedBefore; setStamp(d, name, date, whoAmI() || signName()); });
     closeSheet(); app.renderView(); toast('Kitchen checked. The Draft tag is off until something changes.');

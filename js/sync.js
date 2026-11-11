@@ -12,6 +12,7 @@
 import { S, save, flush, migrateHistory, whoAmI, SYNCED, dirty, hasBook, hasInv } from './state.js';
 import { mergeDoc, getAtPath, dropGone } from './merge.js';
 import { clone, same } from './util.js';
+import { MERGE as MENU_MERGE } from './card3.js';
 
 const API = 'https://api.github.com';
 export const FILES = { book: 'book.json', state: 'state.json', inv: 'inventory.json', counts: 'counts.json', plans: 'floorplans.json', menu: 'card3.json' };
@@ -163,9 +164,43 @@ function whoChanged(doc, path) {
 
 /* The allergen card: when two phones change the same row's allergens (or its shared-equipment marks, its
    sauces and parts, or what shared equipment carries) between syncs, both sets are kept. Dropping one
-   side's entry could drop an allergen from the card. The card screen says which rows to look at. */
-const MENU_JOIN = (path) => /^\.rows\[[^\]]*\]\.(allergens|cross|with|parts)$/.test(path) || /^\.kitchen\[[^\]]*\]\.carries$/.test(path);
-const mergeOpts = (key, o) => (key === 'menu' ? Object.assign({ join: MENU_JOIN }, o || {}) : o);
+   side's entry could drop an allergen from the card. A Veg, GF or DF mark they disagree on goes blank.
+   The rules are MERGE in card3.js; the card screen says which rows to look at. */
+const mergeOpts = (key, o) => (key === 'menu' ? Object.assign({}, MENU_MERGE, o || {}) : o);
+
+/* Inventory: a line's minimum is a number in the line's unit. When one phone changes the unit (which
+   converts the minimum) and the other changes the minimum, merging field by field would leave the
+   other phone's number standing in the new unit: a minimum of 3 cases read as 3 sleeves, and orders
+   worked out from it. So the minimum and loose unit follow whichever side changed the unit, and a
+   note says the other number wasn't used. */
+function unitPar(base, local, remote, m) {
+  const byId = (d) => new Map((d && Array.isArray(d.lines) ? d.lines : []).filter((x) => x && typeof x.id === 'string').map((x) => [x.id, x]));
+  const B = byId(base), L = byId(local), R = byId(remote);
+  for (const line of (m.doc && Array.isArray(m.doc.lines) ? m.doc.lines : [])) {
+    const b = B.get(line && line.id), l = L.get(line && line.id), r = R.get(line && line.id);
+    if (!b || !l || !r) continue;
+    const mine = !same(l.unit, b.unit), theirs = !same(r.unit, b.unit);
+    if (mine === theirs) continue; // neither changed it, or both did (a clash on the unit itself)
+    const src = mine ? l : r, other = mine ? r : l, at = '.lines[' + line.id + ']';
+    m.conflicts = m.conflicts.filter((cf) => cf.path !== at + '.par' && cf.path !== at + '.inner');
+    for (const k of ['par', 'inner']) { if (k in src) line[k] = clone(src[k]); else delete line[k]; }
+    if (!same(other.par, b.par)) m.conflicts.push({ path: at + '.par', kept: mine ? 'phone' : 'github', ours: clone(l.par), theirs: clone(r.par), note: (mine ? 'The other phone changed this minimum while this phone changed the unit. Their number was in the old unit, so it wasn’t used' : 'This phone changed this minimum while the other phone changed the unit. Your number was in the old unit, so it wasn’t used') + '. Check the minimum' });
+  }
+}
+function merge3(key, base, local, remote, o) {
+  const m = mergeDoc(base, local, remote, mergeOpts(key, o));
+  if (key === 'inv') unitPar(base, local, remote, m);
+  return m;
+}
+
+/* Merge notes are a log, and only the newest 50 are kept. A clash someone still has to settle (the
+   Count tab's prompts, the allergen card's "check these rows") is not a log line: the log never
+   pushes one out. */
+export function trimNotes(list) {
+  const must = (c) => !!c && (c.review === true || c.key === 'menu');
+  let extra = list.filter((c) => !must(c)).length - 50;
+  return (extra > 0 ? list.filter((c) => must(c) || extra-- <= 0) : list).slice(-400);
+}
 
 /* Keep a record of changes both sides made, so nothing is dropped without a trace. */
 function noteConflicts(key, path, conflicts, review, remoteJson, report) {
@@ -173,7 +208,7 @@ function noteConflicts(key, path, conflicts, review, remoteJson, report) {
   report.conflicts += conflicts.length;
   if (review) report.review += conflicts.length;
   const at = new Date().toISOString();
-  S.conflicts = (S.conflicts || []).concat(conflicts.map((cf) => Object.assign({ id: 'cf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), key, file: path, at, review, who: whoChanged(remoteJson, cf.path) }, cf))).slice(-50);
+  S.conflicts = trimNotes((S.conflicts || []).concat(conflicts.map((cf) => Object.assign({ id: 'cf' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), key, file: path, at, review, who: whoChanged(remoteJson, cf.path) }, cf))));
   save('conflicts');
 }
 
@@ -214,7 +249,7 @@ async function syncOne(key, report, meta, attempt = 0) {
     // a later send can't quietly undo someone else's change.
     if (remote && remote.sha !== slot.sha) {
       report.pulled.push(key);
-      const m = mergeDoc(slot.base, slot.local, remote.json, mergeOpts(key, { prefer: 'remote', note: 'Couldn’t send this phone’s version, so GitHub’s was kept' }));
+      const m = merge3(key, slot.base, slot.local, remote.json, { prefer: 'remote', note: 'Couldn’t send this phone’s version, so GitHub’s was kept' });
       slot.local = m.doc; slot.base = clone(remote.json); slot.sha = remote.sha;
       noteConflicts(key, path, m.conflicts, false, remote.json, report);
     }
@@ -245,7 +280,7 @@ async function syncOne(key, report, meta, attempt = 0) {
   if (remote.sha !== slot.sha) {
     // First sync with this repo (a new phone, a restored backup, a newly connected repo): GitHub's
     // copy is the shared truth, so it wins any differences. Things only this phone has are kept.
-    const m = mergeDoc(slot.base, slot.local, remote.json, mergeOpts(key, fresh ? { prefer: 'remote' } : undefined));
+    const m = merge3(key, slot.base, slot.local, remote.json, fresh ? { prefer: 'remote' } : undefined);
     next = m.doc; conflicts = m.conflicts;
     if (!same(remote.json, slot.base)) report.pulled.push(key);
   }
@@ -261,7 +296,7 @@ async function syncOne(key, report, meta, attempt = 0) {
     if (same(slot.local, had)) slot.local = clone(sent);
     else {
       // Changed here while sending: put those changes on top of what was sent; they go next time.
-      const m = mergeDoc(had, slot.local, sent, mergeOpts(key));
+      const m = merge3(key, had, slot.local, sent);
       slot.local = m.doc; conflicts = conflicts.concat(m.conflicts);
       report.again = true;
     }

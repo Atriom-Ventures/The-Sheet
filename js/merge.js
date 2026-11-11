@@ -15,6 +15,7 @@ let PREFER = 'phone'; // 'remote' on a first sync with a repo, or when this phon
 let NOTE = '';
 let KEPT = new Set(); // ids a deletion clash kept, so their deletion markers are lifted
 let JOIN = null; // (path) => true for lists where a clash keeps both sides' entries (see mergeDoc)
+let BLANK = null; // (path) => true for a value that goes blank when both sides changed it, instead of picking one
 
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const isIdArray = (a) => Array.isArray(a) && a.length > 0 && a.every((x) => isObj(x) && typeof x.id === 'string');
@@ -35,6 +36,11 @@ function mergeValue(base, local, remote, path, conflicts) {
     (remote || []).forEach((x) => { if (!out.some((y) => same(x, y))) out.push(clone(x)); });
     conflicts.push({ path, kept: 'both', theirs: clone(remote), ours: clone(local), note: 'Changed on both: every entry from both was kept' });
     return out;
+  }
+  if (BLANK && BLANK(path)) {
+    // A claim neither side can be trusted on once they disagree: keep neither, and say so.
+    conflicts.push({ path, kept: 'neither', theirs: clone(remote), ours: clone(local), note: 'Changed on both: left blank for someone to decide' });
+    return '';
   }
   if (PREFER === 'remote') { conflicts.push({ path, kept: 'github', theirs: clone(remote), ours: clone(local), note: NOTE || 'First sync with this repo: GitHub’s version kept' }); return clone(remote); }
   conflicts.push({ path, kept: 'phone', theirs: clone(remote), ours: clone(local) });
@@ -157,6 +163,7 @@ export function mergeDoc(base, local, remote, opts) {
   NOTE = (opts && opts.note) || '';
   KEPT = new Set();
   JOIN = opts && typeof opts.join === 'function' ? opts.join : null;
+  BLANK = opts && typeof opts.blank === 'function' ? opts.blank : null;
   try {
     const marks = isObj(local) && isObj(remote) ? mergeGone(base, local, remote) : null;
     const doc = mergeValue(base == null ? {} : withoutGone(base), withoutGone(local), withoutGone(remote), '', conflicts);
@@ -165,7 +172,7 @@ export function mergeDoc(base, local, remote, opts) {
       if (Object.keys(marks).length) { doc[GONE] = marks; dropGone(doc); }
     }
     return { doc, conflicts };
-  } finally { PREFER = 'phone'; NOTE = ''; KEPT = new Set(); JOIN = null; }
+  } finally { PREFER = 'phone'; NOTE = ''; KEPT = new Set(); JOIN = null; BLANK = null; }
 }
 
 /* Paths in merge notes look like .lines[ln_x].products[p_y].par: a field after a dot, an item id in

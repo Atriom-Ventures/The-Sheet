@@ -511,4 +511,54 @@ Vw.st.edit('menu', (d) => { d.rows[0].allergens = []; });
 await Vw.sy.syncAll();
 check(puts() === putsC && cardOnGH().rows[0].allergens.length === 3, 'a change on a view-only phone is not sent');
 
+console.log('\n23. Review fixes: a unit and a minimum changed apart, a menu mark two phones disagree on, notes that can’t be pushed out');
+{
+  const invOnGH = () => readJSON(SHARED, 'inventory.json');
+  const nap = (d) => d.lines.find((l) => l.id === 'ln-napkins');
+  const setNap = async (fn) => { E.st.edit('inv', (inv) => fn(nap(inv))); await E.sy.syncAll(); await F.sy.syncAll(); await E.sy.syncAll(); };
+  await setNap((n) => { n.unit = 'case'; n.inner = 'sleeve'; n.par = 2; n.products[0].perCase = 20; });
+  check(nap(F.S.inv.local).unit === 'case' && nap(F.S.inv.local).par === 2, '(setup: napkins counted in cases, 20 sleeves a case, minimum 2 cases, on both phones)');
+  // E switches the line to sleeves (the minimum becomes 40). F, not knowing, raises the minimum to 3 (cases).
+  E.count.changeUnit('ln-napkins', 'sleeve');
+  F.st.edit('inv', (inv) => { nap(inv).par = 3; });
+  F.S.conflicts = F.S.conflicts.filter((c) => !c.review);
+  await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+  check(nap(invOnGH()).unit === 'sleeve' && nap(invOnGH()).par === 40 && nap(F.S.inv.local).par === 40, 'one phone changes the unit, the other the minimum: the minimum isn’t left as 3 sleeves (it’s ' + nap(invOnGH()).par + ' ' + nap(invOnGH()).unit + 's)');
+  const note = F.S.conflicts.find((c) => c.review && /ln-napkins\]\.par$/.test(c.path));
+  check(r.review === 1 && note && /old unit/.test(note.note) && /Check the minimum/.test(F.count.render({ sub: 'count' })), '…and the phone whose number wasn’t used is told to check the minimum');
+  F.act('clash-mine', { id: note.id });
+  // The other way round: the phone that changed the unit syncs second.
+  await setNap((n) => { n.unit = 'case'; n.inner = 'sleeve'; n.par = 2; });
+  F.count.changeUnit('ln-napkins', 'sleeve');
+  E.st.edit('inv', (inv) => { nap(inv).par = 3; });
+  await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+  const note2 = F.S.conflicts.find((c) => c.review && /ln-napkins\]\.par$/.test(c.path));
+  check(nap(invOnGH()).par === 40 && note2 && !!note2.note && !/Use EE/.test(F.count.render({ sub: 'count' })), 'whichever syncs second: still 40 sleeves, and no “use theirs” button that would put 3 back');
+  if (note2) F.act('clash-mine', { id: note2.id });
+
+  // The allergen card: one phone takes a gluten-free mark off, the other changes it to "yes".
+  const pasta = (d) => d.rows.find((x) => x.id === 'm-pasta');
+  await E.sy.syncAll(); await F.sy.syncAll();
+  check(pasta(E.S.menu.local).gf === 'opt' && pasta(F.S.menu.local).gf === 'opt', '(setup: the pasta is marked “can be made gluten-free” on both phones)');
+  E.st.edit('menu', (d) => { delete pasta(d).gf; });
+  F.st.edit('menu', (d) => { pasta(d).gf = 'yes'; });
+  await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+  check(!pasta(cardOnGH()).gf && !pasta(E.S.menu.local).gf && !pasta(F.S.menu.local).gf, 'two phones disagree on a gluten-free mark: neither is kept, the box goes blank');
+  check(F.S.conflicts.some((cf) => cf.key === 'menu' && cf.kept === 'neither' && /m-pasta\]\.gf$/.test(cf.path)) && !c3.isChecked(cardOnGH()), '…with a note to check the row, and the card is a draft');
+
+  // A flood of ordinary merge notes doesn't push out a clash someone still has to settle.
+  E.st.edit('inv', (inv) => { nap(inv).note = 'top shelf'; });
+  F.st.edit('inv', (inv) => { nap(inv).note = 'back room'; });
+  await E.sy.syncAll(); await F.sy.syncAll();
+  const waiting = F.S.conflicts.filter((c) => c.review).length, cardNotes = F.S.conflicts.filter((c) => c.key === 'menu').length;
+  check(waiting === 1 && cardNotes >= 1, '(setup: F has an inventory clash to settle and a card row to check)');
+  E.st.edit('plans', (d) => { d.versions.forEach((v) => v.rooms.forEach((x) => x.items.forEach((i) => { i.x = (i.x || 0) + 1; i.y = (i.y || 0) + 1; i.label = 'E' + i.label; }))); });
+  F.st.edit('plans', (d) => { d.versions.forEach((v) => v.rooms.forEach((x) => x.items.forEach((i) => { i.x = (i.x || 0) + 2; i.y = (i.y || 0) + 2; i.label = 'F' + i.label; }))); });
+  await E.sy.syncAll(); r = await F.sy.syncAll();
+  check(r.conflicts > 50, '(setup: one sync leaves ' + r.conflicts + ' ordinary merge notes)');
+  check(F.S.conflicts.filter((c) => c.review).length === waiting && F.S.conflicts.filter((c) => c.key === 'menu').length === cardNotes, 'the clash to settle and the card’s note are still there');
+  check(F.S.conflicts.filter((c) => !c.review && c.key !== 'menu').length === 50, '…and the ordinary notes are still trimmed to the newest 50');
+  await E.sy.syncAll();
+}
+
 T.done();

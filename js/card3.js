@@ -31,6 +31,17 @@ export const KINDS = { dish: 'Dish', side: 'Side', extra: 'Sauce, topping or par
 export const MARKS = { '': 'Blank (kitchen to fill in)', yes: 'Yes, as served', opt: 'Can be made that way', L: 'Lunch menu only', D: 'Dinner menu only' };
 export const FILE_TYPE = 'the-sheet-card3';
 
+/* How this file merges when two phones changed the same thing between syncs (see merge.js), and when a
+   row is saved over a copy that changed while its sheet was open.
+   join:  lists where dropping one side's entry could drop an allergen from the card. Every entry from
+          both sides is kept, even one the other side took off. A person decides, not the merge.
+   blank: the Veg, GF and DF marks. Each is a claim a guest may rely on, so when two phones disagree
+          neither is kept: the box goes back to blank (kitchen to fill in). */
+export const MERGE = {
+  join: (path) => /^\.rows\[.*\]\.(allergens|cross|with|parts)$/.test(path) || /^\.kitchen\[.*\]\.carries$/.test(path) || /^\.notes\.[a-z]+\.ask$/.test(path),
+  blank: (path) => /^\.rows\[.*\]\.(veg|gf|df)$/.test(path)
+};
+
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const str = (v) => (v == null || typeof v === 'object' ? '' : String(v)).trim();
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -59,7 +70,7 @@ export const rowsOf = (doc) => arr(doc && doc.rows).filter((r) => isObj(r) && ty
 export function kitchenOf(doc) {
   return arr(doc && doc.kitchen).filter((k) => isObj(k) && typeof k.id === 'string' && k.id).map((k) => ({
     id: k.id, title: str(k.title), text: str(k.text), chip: str(k.chip), legend: str(k.legend), foot: str(k.foot),
-    carries: uniq(arr(k.carries).filter((a) => A_IDS.has(a))), listAs: str(k.listAs), sub: str(k.sub), menuWord: str(k.menuWord)
+    carries: uniq(arr(k.carries).filter((a) => A_IDS.has(a))), bad: arr(k.carries).filter((a) => !A_IDS.has(a)).length, listAs: str(k.listAs), sub: str(k.sub), menuWord: str(k.menuWord)
   }));
 }
 export function notesOf(doc, a) {
@@ -135,7 +146,7 @@ function resolve(list, byId, kitchen, row, pageMeals) {
     const t = x.ref ? byId.get(x.ref) : null;
     const c = t ? chipsOf(t, kitchen) : { al: [], cross: [] };
     const want = x.meals.length ? x.meals : (t && t.meals.length ? t.meals : []);
-    return { name: x.t || (t ? t.name : ''), missing: !!x.ref && !t, mark: mealMark(want, rowMeals), al: c.al, cross: c.cross };
+    return { name: x.t || (t ? t.name : ''), missing: !!x.ref && !t, bad: !!t && t.bad > 0, mark: mealMark(want, rowMeals), al: c.al, cross: c.cross };
   }).filter((x) => x.name || x.missing);
 }
 
@@ -151,7 +162,7 @@ export function menuPage(doc, which) {
     const mark = (v) => (v === 'L' || v === 'D' ? (pageMeals.includes(v) && pageMeals.length > 1 ? v : (pageMeals.includes(v) ? 'yes' : '')) : v);
     return {
       id: r.id, name: r.name, kind: r.kind, meals: pageMeals.filter((m) => r.meals.includes(m)), desc: r.desc, check: r.check,
-      al: c.al, cross: c.cross, parts: resolve(r.parts, byId, kitchen, r, pageMeals), with: resolve(r.with, byId, kitchen, r, pageMeals),
+      al: c.al, cross: c.cross, bad: r.bad > 0, parts: resolve(r.parts, byId, kitchen, r, pageMeals), with: resolve(r.with, byId, kitchen, r, pageMeals),
       packaged: r.packaged, tail: r.tail || (r.daily ? card.dailyTail : ''), veg: mark(r.veg), gf: mark(r.gf), df: mark(r.df)
     };
   };
@@ -212,15 +223,20 @@ export function frontLines(doc, max = 6) {
 }
 
 /* ---------- things worth a look ----------
-   Not errors the app fixes: a list for whoever keeps the card. */
+   Not errors the app fixes: a list for whoever keeps the card. The ones marked `block` are lines the
+   app can't read (a misspelled allergen, a row with no id). What they say isn't on the printed card,
+   so the card can't be marked kitchen checked until they're fixed. */
 export function issues(doc) {
   const rows = rowsOf(doc), kitchen = kitchenOf(doc), ids = new Set(rows.map((r) => r.id)), kids = new Set(kitchen.map((k) => k.id)), out = [];
   const names = new Map();
+  const lost = arr(doc && doc.rows).filter((r) => isObj(r) && !(typeof r.id === 'string' && r.id)).length;
+  if (lost) out.push({ row: '', block: true, text: (lost === 1 ? 'A row in the file has no id, so it doesn’t' : lost + ' rows in the file have no id, so they don’t') + ' print. Fix the file.' });
+  kitchen.forEach((k) => { if (k.bad) out.push({ row: '', block: true, text: (k.title || k.chip || 'Shared equipment') + ' lists an allergen the app can’t read, so it’s left out. Open it, tick what it carries and save.' }); });
   rows.forEach((r) => {
     const nm = r.name || '(no name)';
     if (!r.name) out.push({ row: r.id, text: 'A row has no name.' });
     if (r.kind !== 'extra' && !r.meals.length) out.push({ row: r.id, text: nm + ' isn’t on any menu, so it prints nowhere.' });
-    if (r.bad) out.push({ row: r.id, text: nm + ' has an allergen line the app can’t read. Open it and save it again.' });
+    if (r.bad) out.push({ row: r.id, block: true, text: nm + ' has an allergen line the app can’t read, so it’s left off the pages. Open the row, pick the allergen and save.' });
     r.with.concat(r.parts).forEach((x) => { if (x.ref && !ids.has(x.ref)) out.push({ row: r.id, text: nm + ' points to a sauce or part that was deleted' + (x.t ? ' (' + x.t + ')' : '') + '. Its allergens no longer show.' }); });
     r.cross.forEach((c) => { if (!kids.has(c)) out.push({ row: r.id, text: nm + ' is marked for shared equipment that isn’t on the card anymore.' }); });
     if (r.name && r.kind !== 'extra') { const k = r.name.toLowerCase() + '|' + r.kind; if (names.has(k)) out.push({ row: r.id, text: 'Two rows are named ' + r.name + '. They print as two lines.' }); names.set(k, 1); }
@@ -228,6 +244,7 @@ export function issues(doc) {
   });
   return out;
 }
+export const blocking = (doc) => issues(doc).filter((i) => i.block);
 export function openCount(doc) { return rowsOf(doc).reduce((n, r) => n + r.entries.filter((e) => RANK[e.s] === 1).length, 0); }
 
 /* ---------- a new, empty card ---------- */

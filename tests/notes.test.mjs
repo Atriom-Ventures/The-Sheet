@@ -115,4 +115,39 @@ console.log('\n5. Picked jobs stay out of the report unless My jobs is on');
   check(/My assignments/.test(on), 'on: picked jobs are reported as before');
 }
 
+console.log('\n6. The sheet left open across a shift change');
+{
+  // The lead opens the report, the phone is locked, and the next shift has started when they come back.
+  const P = await phone('Stale', null);
+  P.shift.openNotes('notes');
+  mk('note-text').value = 'Ice machine slow'; P.act('note-add');
+  P.act('notes-seg', { id: 'report' });
+  check(/Ice machine slow/.test(mk('rep-chit').textContent), '(setup: the report on screen has the note)');
+  const mine0 = P.S.shift.key;
+  // Move the AM/PM line so that "now" falls in the other shift, which is what the clock passing it does.
+  P.st.B().day = Object.assign({}, P.st.B().day, { pmStart: /\|PM$/.test(mine0) ? '23:59' : '00:01' });
+  P.st.rollDay();                        // the app notices when it comes back to the front, as main.js does
+  clip = '';
+  await P.act('notes-copy');
+  check(!/Smooth shift/.test(clip), 'Copy report doesn’t copy the new shift’s empty report while the screen shows the earlier one (copied: ' + JSON.stringify(clip.slice(0, 40)) + ')');
+  check(P.S.shift.key !== mine0 && !P.S.shift.sentAt && P.S.shift.notes.length === 0, '…and the new, empty shift isn’t marked as sent');
+  check(P.S.shift.held.length === 1 && /Ice machine slow/.test(mk('notes-body').innerHTML) && /held-copy/.test(mk('notes-body').innerHTML), 'the sheet switches to Earlier, where those notes now are, still unsent');
+  await P.act('held-copy', { i: '0' });
+  check(/Ice machine slow/.test(clip) && !!(P.S.shift.held[0] || {}).sentAt, 'sending from there copies the notes and marks that shift sent');
+
+  // Buttons under Earlier are for the shift they were drawn for, even if the list has changed since.
+  const Q = await phone('Stale2', { key: yesterday, notes: [note('n3', 'Second thing')], f: {}, sentAt: null, held: [{ key: twoDaysAgo, notes: [note('n4', 'First thing')], f: {}, sentAt: '18:00', sentHow: 'copied' }] });
+  check(Q.S.shift.held.length === 1 && Q.S.shift.held[0].notes[0].text === 'Second thing', '(setup: the sent shift cleared; one unsent shift is held)');
+  Q.S.shift.held.unshift({ key: twoDaysAgo, notes: [note('n5', 'Older thing')], f: {}, sentAt: null });
+  Q.shift.openNotes('earlier');
+  const k = (/data-act="held-del"[^>]*data-k="([^"]*)"/.exec(mk('sheet-root').innerHTML.split('Second thing')[1] || '') || [])[1];
+  check(k === yesterday, 'each Earlier button names its shift, not its place in the list');
+  Q.S.shift.held.shift();                // the list changes underneath (a shift rolled over)
+  await Q.act('held-del', { k, armed: '1' });
+  check(Q.S.shift.held.length === 0, 'Delete removes the shift it was drawn for');
+  Q.S.shift.held = [{ key: twoDaysAgo, notes: [note('n6', 'Keep me')], f: {}, sentAt: null }];
+  await Q.act('held-del', { k, armed: '1' });
+  check(Q.S.shift.held.length === 1, '…and never a different one');
+}
+
 T.done();

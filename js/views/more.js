@@ -6,10 +6,11 @@ import { esc, ago, todayKey, downloadFile, shareFile, pickFile, clone, $ } from 
 import { ICON, empty, toast, armed, field, input, opts } from '../ui.js';
 import { syncAll, testConnection, configured, isSyncing, FILES, conn, bookConfigured, invConfigured, connConfigured, SETTING, repoLabel, appMode, iosBrowserTab, perm } from '../sync.js';
 import { persist, persisted } from '../db.js';
+import { isCard } from '../card3.js';
 
 let lastResult = null, persistState = null, showConn = null, setupKind = null;
-const NAMES = { book: 'Book', state: 'Follow-ups and logs', inv: 'Inventory items', counts: 'Saved counts and orders', plans: 'Floor plans' };
-const CONN_LABEL = { book: 'Book', inv: 'Inventory', train: 'Training (floor plans)' };
+const NAMES = { book: 'Book', state: 'Follow-ups and logs', inv: 'Inventory items', counts: 'Saved counts and orders', plans: 'Floor plans', menu: 'Allergen card' };
+const CONN_LABEL = { book: 'Book', inv: 'Inventory', train: 'Training (floor plans, allergen card)' };
 
 function iosWarning() {
   if (!iosBrowserTab()) return '';
@@ -26,7 +27,7 @@ function connRow(which) {
   if (on) v = '<span class="mono">' + esc(repoLabel(c)) + '</span>' + access;
   else if (keyless) v = '<span class="mono">' + esc(repoLabel(c)) + '</span> · <b class="warn-t">needs its key</b>';
   else if (which === 'inv' && bookConfigured() && !S.settings.invShared) v = 'Using the book repo. Connect a shared repo so others can count and order with you.';
-  else if (which === 'train') v = 'Not connected. Floor plans stay on this phone until it is.';
+  else if (which === 'train') v = 'Not connected. Floor plans and the allergen card stay on this phone until it is.';
   else v = 'Not connected';
   const btnLabel = on ? 'Change' : keyless ? 'Add key' : (which === 'book' ? 'Connect' : which === 'inv' ? 'Connect shared repo' : 'Connect team repo');
   return '<div class="conn-row"><div><b>' + label + '</b><div class="hint">' + v + '</div></div><button class="btn small ghost" data-act="conn-toggle" data-which="' + which + '">' + ICON.key + ' ' + btnLabel + '</button></div>';
@@ -84,7 +85,7 @@ function keyHelpTeam() {
   return '<details class="todo-list"><summary>Which key to use</summary><ol class="help-steps">' +
     '<li><b>If you set up the organization:</b> on github.com, open your picture → <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens</b>, open the key you use for inventory, and add the training repo under <b>Only select repositories</b>. Save, then paste that same key above.</li>' +
     '<li><b>Everyone else:</b> your organization key (the one with <b>All repositories</b>) already covers it once you’ve been given access. Paste that key above.</li>' +
-    '<li>The key needs <b>Contents: Read and write</b> to edit floor plans. With view-only access, the maps still load and print.</li></ol>' +
+    '<li>The key needs <b>Contents: Read and write</b> to edit floor plans and the allergen card. With view-only access, they still load and print.</li></ol>' +
     '<p class="hint">The key stays on this phone and is left out of backups.</p></details>';
 }
 function keyHelp(which) {
@@ -132,7 +133,7 @@ function aboutCard() {
   const full = appMode() !== 'inv';
   return '<section class="panel"><div class="row-h"><h2 class="sec-h">About</h2></div>' +
     '<p>The Sheet ' + esc(app.version) + '. The app itself holds no work content. ' + (full ? 'The book comes from your private repo, and inventory from the shared inventory repo (or the book repo if there isn’t one); everything else stays on this phone.' : 'The inventory comes from the shared inventory repo; everything else stays on this phone.') + '</p>' +
-    (full ? '<ul class="plain-list"><li><b>Synced to the book repo:</b> book, follow-ups, wins, printed log.</li><li><b>Synced to the inventory repo:</b> inventory items, saved counts, order status.</li><li><b>Synced to the training repo:</b> floor plans.</li><li><b>Phone only:</b> today’s ticks, shift notes, floor board, trainees, message drafts, staffing plan, the count in progress, the keys.</li></ul>'
+    (full ? '<ul class="plain-list"><li><b>Synced to the book repo:</b> book, follow-ups, wins, printed log.</li><li><b>Synced to the inventory repo:</b> inventory items, saved counts, order status.</li><li><b>Synced to the training repo:</b> floor plans, the allergen card.</li><li><b>Phone only:</b> today’s ticks, shift notes, floor board, trainees, message drafts, staffing plan, the count in progress, the keys.</li></ul>'
       : '<ul class="plain-list"><li><b>Shared:</b> inventory items, saved counts, order status, with your initials.</li><li><b>Phone only:</b> the count in progress and the key.</li></ul>') +
     '<div class="row-actions"><button class="btn small ghost" data-act="check-update">Check for an app update</button><button class="btn small danger" data-act="erase">' + ICON.trash + ' Erase this phone’s data</button></div></section>';
 }
@@ -147,7 +148,7 @@ export function render() {
    by room or table), the floor board and break times, remembered staff names, message drafts
    (incident notes included) and clash notes (copies of both sides' values). They're daily, and they
    can name people; a backup file goes to Downloads or wherever it's shared. Keys never go in. */
-const BACKUP_KEYS = ['book', 'inv', 'state', 'counts', 'plans', 'count', 'day', 'trainees', 'settings'];
+const BACKUP_KEYS = ['book', 'inv', 'state', 'counts', 'plans', 'menu', 'count', 'day', 'trainees', 'settings'];
 // Older backups may still have these. The staffing plan (priv) comes only from its own phone-only file.
 const NEVER_RESTORE = ['shift', 'floor', 'msgs', 'conflicts', 'priv'];
 const NO_BACKUP_SETTINGS = ['token', 'invToken', 'trainToken', 'floorNames'];
@@ -189,6 +190,10 @@ async function importFile() {
     if ((S.plans.local && (S.plans.local.versions || []).length) && !confirm('Replace the floor plans on this phone with this file?')) return;
     const d = clone(j); delete d.type; S.plans.local = d; save('plans'); toast('Floor plans loaded.'); app.go('#book/maps'); return;
   }
+  if (isCard(j)) {
+    if ((S.menu.local && (S.menu.local.rows || []).length) && !confirm('Replace the allergen card on this phone with this file?')) return;
+    const d = clone(j); delete d.type; S.menu.local = d; save('menu'); toast('Allergen card loaded.'); app.go('#book/allergens'); return;
+  }
   if (j && Array.isArray(j.lines) && Array.isArray(j.cats)) {
     if (hasInv() && !confirm('Replace the inventory on this phone with this file?')) return;
     S.inv.local = j; save('inv'); toast('Inventory loaded.'); app.go('#count'); return;
@@ -200,12 +205,12 @@ async function doSync() {
   lastResult = null; app.renderView();
   try {
     const r = await syncAll();
-    const parts = [], F = { book: 'the book', state: 'follow-ups and logs', inv: 'inventory items', counts: 'saved counts', plans: 'floor plans' };
+    const parts = [], F = { book: 'the book', state: 'follow-ups and logs', inv: 'inventory items', counts: 'saved counts', plans: 'floor plans', menu: 'the allergen card' };
     const nice = (a) => a.map((f) => F[f] || f).join(', ');
     if (r.pulled.length) parts.push('got updates to ' + nice(r.pulled));
     if (r.pushed.length) parts.push('saved ' + nice(r.pushed) + ' to GitHub');
     if (r.review) parts.push(r.review + ' clash' + (r.review === 1 ? '' : 'es') + ' to review on the Count tab');
-    if (r.readOnly.length) parts.push(r.readOnly.map((w) => ({ inv: 'inventory', train: 'the floor plans', book: 'the book' })[w] || w).join(' and ') + (r.readOnly.length === 1 ? ' is' : ' are') + ' view only for this key');
+    if (r.readOnly.length) parts.push(r.readOnly.map((w) => ({ inv: 'inventory', train: 'the training repo', book: 'the book' })[w] || w).join(' and ') + (r.readOnly.length === 1 ? ' is' : ' are') + ' view only for this key');
     if (r.conflicts - r.review > 0) parts.push((r.conflicts - r.review) + ' merge note' + (r.conflicts - r.review === 1 ? '' : 's'));
     lastResult = parts.length ? 'Synced: ' + parts.join('; ') + '.' : 'Synced. Everything already matched.';
     if (r.errors.length) { lastResult = (parts.length ? lastResult + ' ' : '') + 'Didn’t finish: ' + r.errors.map((e) => e.message).join(' '); toast('Sync didn’t finish.'); }

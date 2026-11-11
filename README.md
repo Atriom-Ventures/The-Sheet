@@ -8,7 +8,7 @@
 
 - **Book** (one person): `book.json` and `state.json`: checklists, cards, the day, follow-ups, wins, the printed-copies log.
 - **Inventory** (shared by everyone who counts and orders): `inventory.json` (lines and products) and `counts.json` (saved counts and order status). If no inventory connection is set, these two files sync to the book repo instead.
-- **Training** (a team repo): `floorplans.json`, the floor plans. It has no fallback: until it's connected, floor plans stay on the phone.
+- **Training** (a team repo): `floorplans.json`, the floor plans, and `card3.json`, the allergen card. It has no fallback: until it's connected, both stay on the phone.
 
 A phone with only an inventory connection runs in **count-only mode**: just the Count and More tabs.
 
@@ -72,6 +72,24 @@ Book → Maps. Each room has walls, tables, bar seats, counters and labels (entr
 - Rooms and tables keep their ids in every version, so a table is the same table before and after it moves. A room can be marked closed for work, with a note.
 
 Tables move by dragging, or with the arrow buttons (no dragging needed, WCAG 2.5.7); every table and every corner of the walls can also be picked from a list of buttons. Printouts put each room on its own page with the version's name and the date it went into use, and a version going out of use makes its printed copies show as out of date under Lead → Printed. Deleting a version leaves a deletion marker (its id only); rooms and tables never get one, because they live on in other versions.
+
+## Allergen card
+
+Book → Allergens. One file, `card3.json`, holds a set of menu rows: dishes, sides, and the sauces, toppings and parts that go with them. Each row says which meals it's on, what goes out with it, its vegetarian, gluten-free and dairy-free marks, and its allergens. Each allergen on a row has a status:
+
+- **In it, can't be left out.** Solid chip; listed on the back page.
+- **In it as served, can be made without.** Solid chip; the back page says what to leave off.
+- **Ask** (not confirmed) and **Ask, check the label** (packaged). Dashed chip with a question mark: treat as in it.
+
+Shared equipment (a fryer, a flat-top) is its own list: what it carries, and which rows use it. Those rows get its chip, and the back page lists it under each allergen it carries.
+
+The four Letter pages are worked out from the rows every time they're shown: the guide, the back page ("can't leave it out", by allergen across all menus), and a menu page each for breakfast and for lunch and dinner. Nothing is typed onto a page, so a menu change is one edit and no page can disagree with another. The app holds the layout only; every word about a menu comes from the file.
+
+**Kitchen checked** is a name and a date tied to a fingerprint of everything the kitchen looked at. Change any row, any shared equipment or any word, on any phone or by hand in the file, and the fingerprint no longer matches: every page prints "Draft · kitchen to check" until someone checks it again. Undoing the change doesn't bring the check back. It's a guard against drift, not a signature: someone who edits the file by hand on purpose could forge it.
+
+If two phones change the same row's allergens between syncs, every entry from both is kept (the ordinary merge would keep one phone's list), the card screen names the rows to check, and the card can't be marked checked until someone has.
+
+The card screen measures the pages with the app's own fonts and warns when one has grown past the bottom of the sheet, before printing too. Print with Letter paper, margins None, scale 100%. A view-only key can look and print.
 
 ## Ordering
 

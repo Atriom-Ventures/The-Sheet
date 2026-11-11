@@ -474,4 +474,41 @@ Vw.st.edit('plans', (d) => { d.live = 'v-next'; });
 await Vw.sy.syncAll();
 check(puts() === putsV && plansOnGH().live === 'v-now', 'nothing changed on a view-only phone is sent');
 
+console.log('\n22. The allergen card in the Training repo');
+const c3 = await import('../js/card3.js'); // no state of its own, so one copy serves every phone
+const cardOnGH = () => readJSON('team/training', 'card3.json');
+E.st.edit('menu', (d) => Object.assign(d, JSON.parse(fixtureText('card3.json'))));
+r = await E.sy.syncAll();
+check(!r.errors.length && cardOnGH() && cardOnGH().rows.length === 18, 'the card goes to the Training repo');
+check(!GH.repos[SHARED].files['card3.json'] && !GH.repos['owner/book'].files['card3.json'], '…and to no other repo');
+await F.sy.syncAll();
+check(F.S.menu.local && F.S.menu.local.rows.length === 18, 'another phone with access gets it');
+// One phone marks it kitchen checked while the other changes a row.
+E.st.edit('menu', (d) => { c3.setStamp(d, 'Pat', '2026-01-12', 'EE'); });
+F.st.edit('menu', (d) => { d.rows.find((x) => x.id === 'm-pasta').allergens.push({ a: 'egg', s: 'ask', from: 'fresh pasta' }); });
+await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+check(cardOnGH().rows.find((x) => x.id === 'm-pasta').allergens.length === 4 && !!cardOnGH().stamp && r.conflicts === 0, 'a kitchen check on one phone and a row change on another both arrive, no clash');
+check(!c3.isChecked(cardOnGH()) && !c3.isChecked(E.S.menu.local) && !c3.isChecked(F.S.menu.local), '…and the card is a draft on GitHub and on both phones: the check was for the card before the change');
+E.st.edit('menu', (d) => { c3.setStamp(d, 'Pat', '2026-01-13', 'EE'); });
+await E.sy.syncAll(); await F.sy.syncAll();
+check(c3.isChecked(cardOnGH()) && c3.isChecked(F.S.menu.local), 'checked again with nothing else changing: checked everywhere');
+// Both phones add a different allergen to the same row before either syncs. Neither may be dropped.
+E.st.edit('menu', (d) => { d.rows.find((x) => x.id === 'm-pasta').allergens.push({ a: 'sesame', s: 'in', from: 'the oil' }); });
+F.st.edit('menu', (d) => { d.rows.find((x) => x.id === 'm-pasta').allergens.push({ a: 'fish', s: 'ask', from: 'the stock' }); });
+await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+{
+  const has = (d) => { const al = d.rows.find((x) => x.id === 'm-pasta').allergens.map((e) => e.a); return al.includes('sesame') && al.includes('fish'); };
+  check(has(cardOnGH()) && has(E.S.menu.local) && has(F.S.menu.local), 'two phones add different allergens to one row: both are on GitHub and on both phones');
+  check(r.conflicts === 1 && F.S.conflicts.some((cf) => cf.key === 'menu' && cf.kept === 'both' && /m-pasta/.test(cf.path)), '…and the phone that merged them has a note to check the row');
+  check(!c3.isChecked(cardOnGH()), '…and the card is a draft: the kitchen checked neither change');
+}
+E.st.edit('menu', (d) => { c3.setStamp(d, 'Pat', '2026-01-14', 'EE'); });
+await E.sy.syncAll(); await F.sy.syncAll();
+await Vw.sy.syncAll();
+check(Vw.S.menu.local && c3.isChecked(Vw.S.menu.local) && !Vw.sy.canWrite('menu'), 'a view-only key loads the card and can’t change it');
+const putsC = puts();
+Vw.st.edit('menu', (d) => { d.rows[0].allergens = []; });
+await Vw.sy.syncAll();
+check(puts() === putsC && cardOnGH().rows[0].allergens.length === 3, 'a change on a view-only phone is not sent');
+
 T.done();

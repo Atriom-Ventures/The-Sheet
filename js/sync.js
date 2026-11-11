@@ -2,7 +2,7 @@
 // Each "part" of the app lives in its own repo, and access is managed on GitHub, not in the app:
 //   book: book.json and state.json (one person's book, follow-ups and logs)
 //   inv:  inventory.json and counts.json (shared between the people who count and order)
-//   train: floorplans.json (training material for the team; later the new-hire cards)
+//   train: floorplans.json and card3.json (training material for the team: floor plans, the allergen card)
 // Every sync asks GitHub what this key can do with each repo. Write access: normal. Read-only:
 // the part still loads but nothing is pushed, and the screens go view-only. No access: that part
 // stops syncing and says so. So adding or removing someone is a change on GitHub only.
@@ -14,9 +14,9 @@ import { mergeDoc, getAtPath, dropGone } from './merge.js';
 import { clone, same } from './util.js';
 
 const API = 'https://api.github.com';
-export const FILES = { book: 'book.json', state: 'state.json', inv: 'inventory.json', counts: 'counts.json', plans: 'floorplans.json' };
+export const FILES = { book: 'book.json', state: 'state.json', inv: 'inventory.json', counts: 'counts.json', plans: 'floorplans.json', menu: 'card3.json' };
 const INV_KEYS = ['inv', 'counts'];
-const TRAIN_KEYS = ['plans'];
+const TRAIN_KEYS = ['plans', 'menu'];
 export const CONNS = ['book', 'inv', 'train'];
 
 /* ---------- connections ---------- */
@@ -161,6 +161,12 @@ function whoChanged(doc, path) {
   return '';
 }
 
+/* The allergen card: when two phones change the same row's allergens (or its shared-equipment marks, its
+   sauces and parts, or what shared equipment carries) between syncs, both sets are kept. Dropping one
+   side's entry could drop an allergen from the card. The card screen says which rows to look at. */
+const MENU_JOIN = (path) => /^\.rows\[[^\]]*\]\.(allergens|cross|with|parts)$/.test(path) || /^\.kitchen\[[^\]]*\]\.carries$/.test(path);
+const mergeOpts = (key, o) => (key === 'menu' ? Object.assign({ join: MENU_JOIN }, o || {}) : o);
+
 /* Keep a record of changes both sides made, so nothing is dropped without a trace. */
 function noteConflicts(key, path, conflicts, review, remoteJson, report) {
   if (!conflicts.length) return;
@@ -208,7 +214,7 @@ async function syncOne(key, report, meta, attempt = 0) {
     // a later send can't quietly undo someone else's change.
     if (remote && remote.sha !== slot.sha) {
       report.pulled.push(key);
-      const m = mergeDoc(slot.base, slot.local, remote.json, { prefer: 'remote', note: 'Couldn’t send this phone’s version, so GitHub’s was kept' });
+      const m = mergeDoc(slot.base, slot.local, remote.json, mergeOpts(key, { prefer: 'remote', note: 'Couldn’t send this phone’s version, so GitHub’s was kept' }));
       slot.local = m.doc; slot.base = clone(remote.json); slot.sha = remote.sha;
       noteConflicts(key, path, m.conflicts, false, remote.json, report);
     }
@@ -239,7 +245,7 @@ async function syncOne(key, report, meta, attempt = 0) {
   if (remote.sha !== slot.sha) {
     // First sync with this repo (a new phone, a restored backup, a newly connected repo): GitHub's
     // copy is the shared truth, so it wins any differences. Things only this phone has are kept.
-    const m = mergeDoc(slot.base, slot.local, remote.json, fresh ? { prefer: 'remote' } : undefined);
+    const m = mergeDoc(slot.base, slot.local, remote.json, mergeOpts(key, fresh ? { prefer: 'remote' } : undefined));
     next = m.doc; conflicts = m.conflicts;
     if (!same(remote.json, slot.base)) report.pulled.push(key);
   }
@@ -255,7 +261,7 @@ async function syncOne(key, report, meta, attempt = 0) {
     if (same(slot.local, had)) slot.local = clone(sent);
     else {
       // Changed here while sending: put those changes on top of what was sent; they go next time.
-      const m = mergeDoc(had, slot.local, sent);
+      const m = mergeDoc(had, slot.local, sent, mergeOpts(key));
       slot.local = m.doc; conflicts = conflicts.concat(m.conflicts);
       report.again = true;
     }

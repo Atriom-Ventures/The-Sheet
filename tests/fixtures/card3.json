@@ -1,0 +1,36 @@
+{
+ "schema": 1,
+ "updated": "2026-01-10",
+ "card": { "eyebrow": "Sample card", "expoEyebrow": "Sample card · Menu pages", "title": "What’s in it", "backTitle": "Can’t leave it out", "sub": "Sample allergen guide", "backSub": "All menus, A to Z", "footer": "Made-up sample data.", "packaged": "breads and sauces. Ask the kitchen.", "hours": { "B": "7–10a", "LD": "Lunch 11a–3p · dinner from 5p" } },
+ "guide": {
+  "rule": { "title": "If they say allergy, treat it as one", "sub": "No need to know why.", "steps": [ { "b": "Ask.", "t": "Never guess." }, { "b": "Write it down,", "t": "so the plate gets checked." } ] },
+  "react": { "title": "If they react", "lead": "Stay with them", "text": "and call for help.", "note": "Keep the plate." },
+  "withNote": "sauces and garnishes.",
+  "allergens": { "dairy": { "what": "Milk from any animal.", "hides": "butter, whey" }, "egg": { "what": "Eggs from any bird.", "hides": "mayo" }, "gluten": { "what": "Wheat, barley and rye.", "hides": "bread, batter" } }
+ },
+ "kitchen": [
+  { "id": "fryer", "title": "Shared fryer", "text": "Everything fried can carry fish and gluten.", "chip": "FRYER", "foot": "fish, gluten", "legend": "Shared fryer: fish, gluten.", "carries": ["fish", "gluten"], "listAs": "Anything fried", "sub": "shared fryer", "menuWord": "fried food" },
+  { "id": "toaster", "title": "One toaster", "text": "All bread goes in the same toaster.", "foot": "one toaster" }
+ ],
+ "notes": { "peanuts": { "back": "None on these menus.", "menu": "none on these menus" }, "fish": { "ask": ["is there a clean pan?"] }, "gluten": { "off": "(other breads exist)" } },
+ "rows": [
+  { "id": "m-pancakes", "name": "Pancakes", "kind": "dish", "meals": ["B"], "desc": "three, with fruit", "allergens": [ { "a": "dairy", "s": "in", "from": "batter" }, { "a": "egg", "s": "in", "from": "batter" }, { "a": "gluten", "s": "in", "from": "batter" } ], "with": [ { "t": "Berries" }, { "ref": "x-butter" } ], "veg": "yes", "updated": "2026-01-10" },
+  { "id": "m-omelet", "name": "Garden Omelet", "kind": "dish", "meals": ["B", "L"], "desc": "peppers, onion, cheese + toast", "allergens": [ { "a": "dairy", "s": "opt", "from": "cheese" }, { "a": "egg", "s": "in", "list": "Eggs and omelets" }, { "a": "gluten", "s": "opt", "from": "toast" } ], "gf": "opt", "veg": "yes", "updated": "2026-01-10" },
+  { "id": "m-eggs", "name": "Two Eggs", "kind": "dish", "meals": ["B"], "allergens": [ { "a": "egg", "s": "in", "list": "Eggs and omelets" } ], "updated": "2026-01-10" },
+  { "id": "m-porridge", "name": "Porridge", "kind": "dish", "meals": ["B"], "check": "cooked in milk?", "allergens": [ { "a": "dairy", "s": "ask" }, { "a": "peanuts", "s": "label", "from": "the topping" } ], "packaged": true, "updated": "2026-01-10" },
+  { "id": "m-fruit", "name": "Fruit Bowl", "kind": "dish", "meals": ["B"], "updated": "2026-01-10" },
+  { "id": "m-tacos", "name": "Fish Tacos", "kind": "dish", "meals": ["L", "D"], "allergens": [ { "a": "fish", "s": "in", "from": "cod", "sub": "battered cod" }, { "a": "gluten", "s": "in", "from": "batter", "list": "Anything fried", "sub": "shared fryer" }, { "a": "dairy", "s": "opt", "from": "crema" } ], "cross": ["fryer"], "with": [ { "ref": "x-slaw", "meals": ["D"] }, { "ref": "x-hot-sauce" } ], "updated": "2026-01-10" },
+  { "id": "m-burger", "name": "House Burger", "kind": "dish", "meals": ["L", "D"], "allergens": [ { "a": "dairy", "s": "opt", "from": "cheese" }, { "a": "egg", "s": "in", "from": "bun", "list": "Burger (bun)" }, { "a": "gluten", "s": "opt", "from": "bun" }, { "a": "sesame", "s": "ask", "from": "seeds on the bun" } ], "packaged": true, "with": [ { "ref": "s-fries", "t": "Fries" } ], "gf": "opt", "veg": "D", "updated": "2026-01-10" },
+  { "id": "m-bowl", "name": "Build a Bowl", "kind": "dish", "meals": ["L", "D"], "check": "sauce?", "parts": [ { "ref": "x-tofu" }, { "ref": "x-chicken", "t": "Chicken" } ], "veg": "opt", "gf": "yes", "df": "L", "updated": "2026-01-10" },
+  { "id": "m-soup", "name": "Soup of the Day", "kind": "dish", "meals": ["L", "D"], "daily": true, "short": "soups", "updated": "2026-01-10" },
+  { "id": "m-pasta", "name": "Walnut Pasta", "kind": "dish", "meals": ["D"], "allergens": [ { "a": "gluten", "s": "opt", "from": "pasta" }, { "a": "nuts", "s": "in", "from": "walnut sauce" }, { "a": "dairy", "s": "in", "from": "cream" } ], "veg": "yes", "gf": "opt", "updated": "2026-01-10" },
+  { "id": "s-fries", "name": "Fries", "kind": "side", "meals": ["L", "D"], "cross": ["fryer"], "packaged": true, "updated": "2026-01-10" },
+  { "id": "s-rice", "name": "Rice", "kind": "side", "meals": ["D"], "updated": "2026-01-10" },
+  { "id": "s-mash", "name": "Mashed potatoes", "kind": "side", "meals": ["L", "D"], "allergens": [ { "a": "dairy", "s": "in", "from": "butter" } ], "updated": "2026-01-10" },
+  { "id": "x-butter", "name": "Butter", "kind": "extra", "meals": [], "allergens": [ { "a": "dairy", "s": "opt", "from": "butter" } ], "updated": "2026-01-10" },
+  { "id": "x-slaw", "name": "Slaw", "kind": "extra", "meals": [], "allergens": [ { "a": "egg", "s": "label", "from": "slaw dressing" } ], "packaged": true, "updated": "2026-01-10" },
+  { "id": "x-hot-sauce", "name": "Hot sauce", "kind": "extra", "meals": [], "updated": "2026-01-10" },
+  { "id": "x-tofu", "name": "Tofu", "kind": "extra", "meals": ["D"], "allergens": [ { "a": "soy", "s": "in", "from": "tofu" } ], "cross": ["fryer"], "updated": "2026-01-10" },
+  { "id": "x-chicken", "name": "Grilled chicken", "kind": "extra", "meals": ["L", "D"], "allergens": [ { "a": "soy", "s": "ask", "from": "marinade" } ], "updated": "2026-01-10" }
+ ]
+}

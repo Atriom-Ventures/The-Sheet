@@ -36,7 +36,7 @@ const { S, B } = await import(path.join(dir, 'js/state.js'));
 const shell = () => mk('top-in').innerHTML + '\n' + mk('nav-in').innerHTML;
 const save = (name, html) => fs.writeFileSync(path.join(out, name + '.html'), '<!doctype html><html lang="en"><body>' + html + '</body></html>');
 save('_shell', shell());
-const routes = ['#now', '#book', '#book/cards', '#book/sheet', '#book/day', '#count', '#count/order', '#count/history', '#count/items', '#lead', '#lead/floor', '#lead/msgs', '#lead/train', '#lead/wins', '#lead/printed', '#more', '#quick', '#book/maps', '#book/map/v-now/r-main', '#book/map/v-next/r-patio'];
+const routes = ['#now', '#book', '#book/cards', '#book/sheet', '#book/day', '#count', '#count/order', '#count/history', '#count/items', '#lead', '#lead/floor', '#lead/msgs', '#lead/train', '#lead/wins', '#lead/printed', '#more', '#quick', '#book/maps', '#book/map/v-now/r-main', '#book/map/v-next/r-patio', '#book/allergens', '#book/allergens/preview'];
 for (const h of routes) { location.hash = h; await new Promise((r) => setTimeout(r, 10)); save(h.slice(1).replace(/\//g, '-'), mk('view').innerHTML); }
 // Edit mode in the book
 location.hash = '#book'; app.ui.editing = true; app.renderView(); save('book-edit', mk('view').innerHTML); app.ui.editing = false;
@@ -44,6 +44,21 @@ location.hash = '#book'; app.ui.editing = true; app.renderView(); save('book-edi
 location.hash = '#book/maps'; app.ui.editing = true; app.renderView(); save('maps-edit', mk('view').innerHTML);
 location.hash = '#book/map/v-now/r-main'; app.ui.editing = true; app.acts['map-sel']({ dataset: { id: 't-7' } }); save('map-edit-table', mk('view').innerHTML);
 app.acts['map-walls']({ dataset: {} }); app.acts['map-corner']({ dataset: { id: '2' } }); save('map-edit-walls', mk('view').innerHTML); app.acts['map-walls']({ dataset: {} }); app.ui.editing = false;
+// The allergen card: edit mode, a row open to read and to edit, and its other sheets. The printed pages too.
+location.hash = '#book/allergens'; app.ui.editing = true; app.renderView(); save('allergens-edit', mk('view').innerHTML);
+{
+  const sheet = (a, data = {}) => { mk('sheet-root').innerHTML = ''; app.acts[a]({ dataset: data, disabled: false, innerHTML: '', classList: { add() {}, remove() {} } }); return mk('sheet-root').innerHTML; };
+  save('sheet-allergen-row-edit', sheet('c3-row', { id: 'm-tacos' }));
+  save('sheet-allergen-row-new', sheet('c3-row-new'));
+  save('sheet-allergen-kitchen', sheet('c3-kit', { id: 'fryer' }));
+  save('sheet-allergen-note', sheet('c3-note', { id: 'fish' }));
+  save('sheet-allergen-stamp', sheet('c3-stamp'));
+  save('sheet-allergen-print', sheet('print', { kind: 'card3' }));
+  app.ui.editing = false;
+  save('sheet-allergen-row-view', sheet('c3-row', { id: 'm-burger' }));
+  const pg = await import(path.join(dir, 'js/card3pages.js'));
+  save('sheet-allergen-pages', pg.allPages(S.menu.local));
+}
 // Open an item editor on the Items tab
 const firstLine = S.inv.local && S.inv.local.lines[0];
 location.hash = '#count/items'; if (firstLine) { try { app.acts['item-open']({ dataset: { id: firstLine.id } }); } catch (e) {} app.renderView(); save('count-items-open', mk('view').innerHTML); }

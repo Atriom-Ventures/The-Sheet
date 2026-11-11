@@ -6,6 +6,7 @@ import { S, B, I, L, edit, blocks, tasksOf, card, catName, revOf, roleName } fro
 import { esc, fmt12, toMin, todayKey, fmtRev, fmtShort, joinAnd, uid, $, fmtNum } from './util.js';
 import { openSheet, closeSheet, toast, field, input, ICON } from './ui.js';
 import * as maps from './views/maps.js';
+import * as c3 from './views/card.js';
 
 let stampText = '';
 const stamp = () => '<p class="pv-rev">' + esc(stampText) + '</p>';
@@ -28,6 +29,7 @@ export function target(t) {
     case 'sheet': return { label: 'Assignment sheet (blank)', rev: revOf(b.assignments) };
     case 'count': return { label: 'Count sheet (blank)', rev: I().updated || todayKey() };
     case 'maps': return maps.printTarget(t.id);
+    case 'card3': return c3.printTarget();
     default: return null;
   }
 }
@@ -48,6 +50,7 @@ export function printWhat(t) {
   openSheet({
     eyebrow: 'Print', title: info.label,
     body: '<p class="muted" style="margin-top:0">Rev ' + esc(fmtRev(info.rev)) + '. Every page is stamped with it, so you can tell an old copy from a new one.</p>' +
+      (t.kind === 'card3' ? c3.printNote() : '') +
       (t.kind === 'book' ? '<label class="checkline"><input type="checkbox" id="pr-drafts"' + (t.drafts ? ' checked' : '') + '><span>Include drafts, marked DRAFT (for a review copy, not the floor)</span></label>' : '') +
       '<div class="form" style="margin-top:12px">' + field('pr-where', 'Where will it go?', input('pr-where', '', 'list="pr-places" placeholder="Wall, binder, manager…" autocomplete="off"'), 'Optional. Logged in Lead → Printed so you know when it’s out of date.') + '</div>' +
       '<datalist id="pr-places">' + places.map((p) => '<option value="' + esc(p) + '">').join('') + '</datalist>' +
@@ -93,6 +96,7 @@ function build(t, info) {
     case 'sheet': return sheetHTML();
     case 'count': return countHTML();
     case 'maps': return maps.printHTML(t.id, stamp);
+    case 'card3': return c3.printHTML();
     default: return '';
   }
 }

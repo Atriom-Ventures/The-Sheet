@@ -13,6 +13,7 @@ import { S, save, flush, migrateHistory, whoAmI, SYNCED, dirty, hasBook, hasInv 
 import { mergeDoc, getAtPath, dropGone } from './merge.js';
 import { clone, same } from './util.js';
 import { MERGE as MENU_MERGE } from './card3.js';
+import { mergeFlags } from './stock.js';
 
 const API = 'https://api.github.com';
 export const FILES = { book: 'book.json', state: 'state.json', inv: 'inventory.json', counts: 'counts.json', plans: 'floorplans.json', menu: 'card3.json' };
@@ -187,9 +188,11 @@ function unitPar(base, local, remote, m) {
     if (!same(other.par, b.par)) m.conflicts.push({ path: at + '.par', kept: mine ? 'phone' : 'github', ours: clone(l.par), theirs: clone(r.par), note: (mine ? 'The other phone changed this minimum while this phone changed the unit. Their number was in the old unit, so it wasn’t used' : 'This phone changed this minimum while the other phone changed the unit. Your number was in the old unit, so it wasn’t used') + '. Check the minimum' });
   }
 }
+/* Order flags on a line have rules of their own (a cleared flag stays cleared; an amount and its unit
+   travel together). They live with the rest of the flag code: mergeFlags in stock.js. */
 function merge3(key, base, local, remote, o) {
   const m = mergeDoc(base, local, remote, mergeOpts(key, o));
-  if (key === 'inv') unitPar(base, local, remote, m);
+  if (key === 'inv') { unitPar(base, local, remote, m); mergeFlags(base, local, remote, m, o); }
   return m;
 }
 

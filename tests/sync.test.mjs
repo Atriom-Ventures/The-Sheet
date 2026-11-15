@@ -7,6 +7,8 @@ import crypto from 'node:crypto';
 import { makePhone, outDir, checker } from './lib/phone.mjs';
 import { fixtureText } from './lib/fixtures.mjs';
 
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
 const OUT = outDir();
 const T = checker();
 const check = T.check;
@@ -79,10 +81,11 @@ async function boot(name, preload) {
   const app = (await import(path.join(dir, 'js/app.js'))).app;
   const count = await import(path.join(dir, 'js/views/count.js'));
   const more = await import(path.join(dir, 'js/views/more.js'));
+  const stock = await import(path.join(dir, 'js/stock.js'));
   app.register(count); app.register(more);
   app.route = { tab: 'count', sub: '', id: '' };
   await st.load();
-  return { name, st, sy, app, count, more, S: st.S, act: (a, data = {}) => app.acts[a]({ dataset: data, disabled: false, innerHTML: '', classList: { add() {}, remove() {} } }) };
+  return { name, st, sy, app, count, more, stock, S: st.S, act: (a, data = {}) => app.acts[a]({ dataset: data, disabled: false, innerHTML: '', classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {}, getAttribute: () => null }) };
 }
 const settle = () => new Promise((r) => setTimeout(r, 400));
 
@@ -166,30 +169,35 @@ const ids = (P) => P.S.counts.local.history.map((h) => h.id).sort().join(',');
 check(A.S.counts.local.history.length === 3 && ids(A) === ids(B), 'both phones have all 3 saved counts');
 
 console.log('\n5. Order status');
-const withOrder = A.S.counts.local.history.filter((h) => h.orderCount > 0).sort((a, b) => b.savedAt.localeCompare(a.savedAt));
-console.log('     (saved counts with something to order: ' + withOrder.length + ')');
-const latest = withOrder[0];
-check(A.S.counts.local.history.slice().sort((a, b) => b.savedAt.localeCompare(a.savedAt))[0].orderCount === 0, '(setup: the newest count has nothing to order, so it mustn’t replace the one that does)');
-check(latest.orderCount > 0 && latest.order && latest.order.status === 'saved', 'newest count with an order starts “not placed”');
-check(/A saved order hasn’t been placed/.test(B.count.render({ sub: 'order' })), 'B’s Order tab shows the unplaced order');
-B.act('ord-placed', { id: latest.id });
-await B.sy.syncAll(); await A.sy.syncAll();
-const aLatest = A.S.counts.local.history.find((h) => h.id === latest.id);
-check(aLatest.order.status === 'placed' && aLatest.order.placedBy === 'BB', 'A sees it placed by BB');
-const aOrder = A.count.render({ sub: 'order' });
-check(/An order is on its way/.test(aOrder) && /Placed .* by BB/.test(aOrder), 'A’s Order tab says it’s on its way, placed by BB');
-A.act('ord-received', { id: latest.id });
+// A flags two lines and places the order. B sees it on its way and marks it received.
+A.act('inv-flag', { line: L1.id }); A.act('inv-flag', { line: L2.id });
+A.act('order-place', { armed: '1' }); await settle();
+const placed = A.S.counts.local.history.find((h) => h.kind === 'order');
+check(!!placed && placed.orderCount === 2 && placed.order.status === 'placed' && placed.order.placedBy === 'AA', 'Order placed files an order record: 2 lines, placed by AA');
+check(!A.S.inv.local.lines.some((l) => l.flag), '…and clears the flags');
 await A.sy.syncAll(); await B.sy.syncAll();
-check(B.S.counts.local.history.find((h) => h.id === latest.id).order.status === 'received', 'received syncs back to B');
-check(!/A saved order|on its way/.test(B.count.render({ sub: 'order' })), 'no open-order banner once received');
-// Two unplaced orders: the older one is replaced by the newer one.
-A.S.count.counts[L1.products[0].id] = 0; A.act('count-save'); await settle();
-const firstOpen = A.S.counts.local.history.slice().sort((a, b) => b.savedAt.localeCompare(a.savedAt))[0];
-await new Promise((r) => setTimeout(r, 15));
-A.S.count.counts[L1.products[0].id] = 0; A.act('count-save'); await settle();
+const bOrder = B.count.render({ sub: 'order' });
+check(/An order is on its way/.test(bOrder) && /Placed .* by AA/.test(bOrder), 'B’s Order tab says an order is on its way, placed by AA');
+B.act('ord-received', { id: placed.id });
+await B.sy.syncAll(); await A.sy.syncAll();
+check(A.S.counts.local.history.find((h) => h.id === placed.id).order.status === 'received' && A.S.counts.local.history.find((h) => h.id === placed.id).order.receivedBy === 'BB', 'received by BB syncs back to A');
+check(!/A saved order|on its way/.test(A.count.render({ sub: 'order' })), 'no open-order banner once received');
+// Orders saved before flags rode on a saved count and started as not placed. Those still work.
+const localDay = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+const oldWay = (id, msAgo) => { const d = new Date(Date.now() - msAgo); return { id, date: localDay(d), savedAt: d.toISOString(), by: 'AA', counts: { [L1.products[0].id]: 0 }, orders: {}, orderCount: 1, text: 'saved the old way', order: { status: 'saved' }, updated: localDay(d) }; };
+A.st.edit('counts', (c) => { c.history.push(oldWay('h-oldway-1', 40), oldWay('h-oldway-2', 0)); }); // both newer than the order above
+const firstOpen = A.S.counts.local.history.find((h) => h.id === 'h-oldway-1');
 check(A.count.orderState(firstOpen) === 'replaced', 'an older unplaced order shows as replaced by a newer one');
 check((A.count.render({ sub: 'order' }).match(/A saved order hasn’t been placed/g) || []).length === 1, 'only the newest unplaced order is flagged');
 await A.sy.syncAll(); await B.sy.syncAll();
+check(/A saved order hasn’t been placed/.test(B.count.render({ sub: 'order' })), 'B’s Order tab shows the unplaced order');
+B.act('ord-placed', { id: 'h-oldway-2' });
+await B.sy.syncAll(); await A.sy.syncAll();
+const aOld = A.S.counts.local.history.find((h) => h.id === 'h-oldway-2');
+check(aOld.order.status === 'placed' && aOld.order.placedBy === 'BB' && /An order is on its way/.test(A.count.render({ sub: 'order' })), 'A sees it placed by BB, on its way');
+A.act('ord-received', { id: 'h-oldway-2' });
+await A.sy.syncAll(); await B.sy.syncAll();
+check(B.S.counts.local.history.find((h) => h.id === 'h-oldway-2').order.status === 'received', 'received syncs back to B');
 
 console.log('\n6. Same line, different fields: no clash');
 A.S.settings.initials = 'AA';
@@ -263,7 +271,10 @@ check(!r.errors.length && r.readOnly.includes('inv'), 'syncs, reported as view o
 check(L.S.inv.local && L.S.counts.local.history.length === A.S.counts.local.history.length, 'gets items and saved counts');
 check(L.sy.canWrite('counts') === false && L.sy.canWrite('inv') === false, 'app knows it can’t write');
 const lOrder = L.count.render({ sub: 'order' });
-check(/View only/.test(lOrder) && !/data-act="count-save"/.test(lOrder) && !/Mark placed|Mark received/.test(lOrder), 'Order tab: view-only note, no Save count, no order buttons');
+check(/View only/.test(lOrder) && !/data-act="count-save"/.test(lOrder) && !/data-act="order-place"/.test(lOrder) && !/Mark placed|Mark received/.test(lOrder), 'Order tab: view-only note, no Save count, no Order placed, no order buttons');
+check(!/data-act="inv-flag"/.test(L.count.render({ sub: 'count' })), 'no Order buttons on the lines');
+L.act('inv-flag', { line: L1.id });
+check(!L.S.inv.local.lines.some((l) => l.flag), 'flagging refuses');
 check(!/data-act="item-add"/.test(L.count.render({ sub: 'items' })) && !/hist-del/.test(L.count.render({ sub: 'history' })), 'no add-line or delete buttons');
 L.S.count.counts[L1.products[0].id] = 3; L.act('count-save');
 check(!L.S.counts.local.history.some((h) => h.by === 'VV'), 'Save count refuses');
@@ -559,6 +570,127 @@ console.log('\n23. Review fixes: a unit and a minimum changed apart, a menu mark
   check(F.S.conflicts.filter((c) => c.review).length === waiting && F.S.conflicts.filter((c) => c.key === 'menu').length === cardNotes, 'the clash to settle and the card’s note are still there');
   check(F.S.conflicts.filter((c) => !c.review && c.key !== 'menu').length === 50, '…and the ordinary notes are still trimmed to the newest 50');
   await E.sy.syncAll();
+}
+
+console.log('\n24. Two phones count the two places');
+{
+  await E.sy.syncAll(); await F.sy.syncAll();
+  const cupsOf = (P) => P.stock.totals().lines['ln-cups'];
+  GH.offline = true;
+  E.S.count.counts['p-cups'] = 43; // the first place: 2 cases + 3 sleeves, at 20 sleeves a case
+  E.act('count-save');
+  const eCount = newest(E).id;
+  F.stock.setRoom('kitchen');
+  F.S.count.counts['p-cups'] = 15; F.S.count.counts['p-lids'] = 4;
+  F.act('count-save');
+  const fCount = newest(F).id;
+  await wait(700); GH.offline = false;
+  await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+  const placeOnGH = (id) => (readJSON(SHARED, 'counts.json').history.find((h) => h.id === id) || {}).place;
+  check(r.conflicts === 0 && placeOnGH(eCount) === 'servery' && placeOnGH(fCount) === 'kitchen', 'two phones save different places offline: both counts reach GitHub with their place, no clash');
+  for (const P of [E, F]) {
+    const t = P.stock.totals(), c = t.lines['ln-cups'];
+    check(c.servery.v === 43 && c.kitchen.v === 15 && c.sum.v === 58 && c.sum.cases === 2 && c.sum.loose === 18, P.name + ': cups are 43 sleeves in one place and 15 in the other, 58 in all (2 cases + 18)');
+    check(t.rooms.servery.by === 'EE' && t.rooms.kitchen.by === 'FF' && t.lines['ln-lids'].servery.v == null && t.lines['ln-lids'].sum.v === 4, P.name + ': each place shows who counted it; a line counted in one place only adds just that');
+  }
+  // The other phone recounts the first place later: its count is the one that stands, everywhere.
+  F.stock.setRoom('servery');
+  F.S.count.counts['p-cups'] = 10; F.act('count-save');
+  await wait(700); await F.sy.syncAll(); await E.sy.syncAll();
+  check(cupsOf(E).servery.v === 10 && cupsOf(E).sum.v === 25 && E.stock.totals().rooms.servery.by === 'FF', 'a newer count of the same place from the other phone replaces the older one on both');
+  // A unit changes after both places were counted, and the change arrives by sync.
+  E.count.changeUnit('ln-cups', 'case');
+  await E.sy.syncAll(); await F.sy.syncAll();
+  check(cupsOf(F).servery.v === 0.5 && cupsOf(F).kitchen.v === 0.75 && cupsOf(F).sum.v === 1.25 && cupsOf(F).sum.cases === 1 && cupsOf(F).sum.loose === 5, 'the line moves from sleeves to cases on one phone: on the other, both saved counts read in cases (10 + 15 sleeves = 1 case + 5), not as 25 cases');
+}
+
+console.log('\n25. The shared order list: flags, clashes, and a cleared flag staying cleared');
+{
+  const invGH = () => readJSON(SHARED, 'inventory.json');
+  const flag = (P, id) => P.stock.flagOf(lineIn(P.S.inv.local, id));
+  const both = async (first, second) => { await first.sy.syncAll(); const rr = await second.sy.syncAll(); await first.sy.syncAll(); return rr; };
+  const clear = (P) => { P.S.conflicts = P.S.conflicts.filter((c) => !c.review); };
+  clear(E); clear(F);
+  // Both phones flag the same line before either syncs.
+  GH.offline = true;
+  E.act('inv-flag', { line: 'ln-lids' }); await wait(5); F.act('inv-flag', { line: 'ln-lids' });
+  GH.offline = false;
+  r = await both(E, F);
+  check(r.conflicts === 0 && flag(E, 'ln-lids').n === 1 && same(lineIn(E.S.inv.local, 'ln-lids').flag, lineIn(F.S.inv.local, 'ln-lids').flag) && same(lineIn(invGH(), 'ln-lids').flag, lineIn(F.S.inv.local, 'ln-lids').flag), 'both phones flag the same line: one flag everywhere, no clash');
+  // …then set different amounts.
+  E.act('ord-inc', { line: 'ln-lids' }); E.act('ord-inc', { line: 'ln-lids' }); F.act('ord-inc', { line: 'ln-lids' });
+  await E.sy.syncAll(); r = await F.sy.syncAll();
+  const fc = F.S.conflicts.find((c) => c.review && /ln-lids\]\.flag\.n$/.test(c.path)) || {};
+  check(r.review === 1 && fc.ours === 2 && fc.theirs === 3 && fc.who === 'EE' && flag(F, 'ln-lids').n === 2, 'different amounts on the same flag: this phone’s 2 stays, with a clash to settle against EE’s 3');
+  const fCount = F.count.render({ sub: 'count' });
+  check(/: order amount/.test(fCount) && /Yours: <b>2<\/b>/.test(fCount) && /Use EE’s/.test(fCount), 'the Count tab asks “Keep mine / Use EE’s”');
+  F.act('clash-theirs', { id: fc.id });
+  await both(F, E);
+  check(flag(E, 'ln-lids').n === 3 && flag(F, 'ln-lids').n === 3 && lineIn(invGH(), 'ln-lids').flag.n === 3 && !F.S.conflicts.some((c) => c.review), 'use theirs → 3 everywhere, clash cleared');
+  // Two phones set how often on the same line.
+  E.stock.setFreq('ln-tea', 'week'); F.stock.setFreq('ln-tea', 'month');
+  await E.sy.syncAll(); r = await F.sy.syncAll();
+  const qc = F.S.conflicts.find((c) => c.review && /ln-tea\]\.freq$/.test(c.path)) || {};
+  check(r.review === 1 && qc.ours === 'month' && qc.theirs === 'week' && /how often/.test(F.count.render({ sub: 'count' })) && /Yours: <b>Monthly<\/b>/.test(F.count.render({ sub: 'count' })), 'how often set two ways: a clash to settle, shown by name');
+  F.act('clash-mine', { id: qc.id }); await both(F, E);
+  check(E.stock.freqOf(lineIn(E.S.inv.local, 'ln-tea')) === 'month', '…keep mine → monthly everywhere');
+
+  // Order placed on one phone. An old backup, and a phone that changed the amount without knowing, must not bring a flag back.
+  E.act('inv-flag', { line: 'ln-tea' });
+  await both(E, F);
+  const backup = JSON.parse(JSON.stringify(E.S.inv.local)); // lids flagged for 3, tea for 1
+  check(!!flag(F, 'ln-lids') && !!flag(F, 'ln-tea'), '(setup: lids and tea are flagged on both phones, and in a backup)');
+  GH.offline = true;
+  E.act('ord-inc', { line: 'ln-tea' }); // E wants 2, and doesn't know yet that…
+  F.act('order-place', { armed: '1' }); // …F has placed the order
+  await wait(1000); GH.offline = false;
+  await F.sy.syncAll(); r = await E.sy.syncAll(); await F.sy.syncAll();
+  const order1 = newest(F);
+  check(order1.kind === 'order' && same(order1.lines.map((x) => [x.line, x.n]), [['ln-lids', 3], ['ln-tea', 1]]) && E.S.counts.local.history.some((h) => h.id === order1.id), 'Order placed files the order for both phones: lids 3, tea 1');
+  check(!flag(E, 'ln-lids') && !flag(F, 'ln-lids') && !lineIn(invGH(), 'ln-lids').flag && !!lineIn(invGH(), 'ln-lids').cleared, '…and the flag it used is cleared on GitHub and on the other phone');
+  check(!flag(E, 'ln-tea') && !lineIn(E.S.inv.local, 'ln-tea').flag && !lineIn(invGH(), 'ln-tea').flag, 'a phone that changed an amount after the order went in elsewhere doesn’t bring the flag back');
+  const told = E.S.conflicts.find((c) => c.review && /ln-tea\]\.flag$/.test(c.path)) || {};
+  check(/You flagged this for 2 boxes/.test(told.note || '') && /went on an order/.test(E.count.render({ sub: 'count' })), '…and it’s told, on the Count tab, that its 2 boxes weren’t kept');
+  GH.tokens['tok-h'] = [SHARED];
+  const H = await boot('H', Object.assign(invOnly('tok-h', 'HH'), { inv: { base: null, local: backup, sha: null, src: null } }));
+  const putsH = puts();
+  r = await H.sy.syncAll();
+  check(!r.errors.length && !flag(H, 'ln-lids') && !flag(H, 'ln-tea') && !lineIn(invGH(), 'ln-lids').flag && !lineIn(invGH(), 'ln-tea').flag, 'an old backup that still has the flags doesn’t bring them back, on its own phone or on GitHub');
+  check(puts() === putsH && r.review === 0, '…and it has nothing to send and nothing to ask');
+  clear(E); clear(F);
+
+  // The other way round: the phone that placed the order syncs second.
+  E.act('inv-flag', { line: 'ln-coffee' }); E.act('inv-flag', { line: 'ln-decaf' });
+  await both(E, F);
+  E.act('ord-inc', { line: 'ln-coffee' }); E.act('ord-inc', { line: 'ln-coffee' }); // coffee: 3 cases…
+  await E.sy.syncAll();                                                              // …which reaches GitHub, but not F
+  GH.offline = true;
+  F.act('order-place', { armed: '1' }); // F places it with coffee at 1
+  await wait(20);
+  E.act('inv-flag', { line: 'ln-decaf' }); E.act('inv-flag', { line: 'ln-decaf' }); // E takes decaf off and puts it back, after the order
+  await wait(1000); GH.offline = false;
+  await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+  check(!!flag(F, 'ln-decaf') && !!flag(E, 'ln-decaf') && !!lineIn(invGH(), 'ln-decaf').flag, 'a line flagged again after the order was placed stays flagged, though the phone that placed the order synced second');
+  check(!flag(F, 'ln-coffee') && !flag(E, 'ln-coffee') && !lineIn(invGH(), 'ln-coffee').flag, '…and the one that only had its amount changed before the order stays cleared');
+  const heard = F.S.conflicts.find((c) => c.review && /ln-coffee\]\.flag$/.test(c.path)) || {};
+  check(/had this down for 3 cases/.test(heard.note || '') && /went in with 1 case/.test(heard.note || '') && heard.who === 'EE', 'the phone that placed the order is told the other one wanted 3 cases when 1 went in');
+  check(!F.S.conflicts.some((c) => /ln-decaf\]/.test(c.path)), '…with no note about the line that was flagged again');
+  clear(E); clear(F);
+
+  // An amount and its unit travel together.
+  E.act('inv-flag', { line: 'ln-soap' });
+  await both(E, F);
+  for (let i = 0; i < 4; i++) E.act('ord-inc', { line: 'ln-soap' }); // E: 5 (each)
+  F.st.edit('inv', (inv) => { lineIn(inv, 'ln-soap').products[0].perCase = 12; }); // F learns it comes 12 to a case…
+  F.act('ord-inc', { line: 'ln-soap' }); // …and orders 2 cases
+  check(same([lineIn(F.S.inv.local, 'ln-soap').flag.n, lineIn(F.S.inv.local, 'ln-soap').flag.unit], [2, 'case']) && same([lineIn(E.S.inv.local, 'ln-soap').flag.n, lineIn(E.S.inv.local, 'ln-soap').flag.unit], [5, 'each']), '(setup: one phone has 5 each, the other 2 cases)');
+  await F.sy.syncAll(); r = await E.sy.syncAll();
+  const eSoap = lineIn(E.S.inv.local, 'ln-soap').flag;
+  check(eSoap.unit === 'case' && eSoap.n === 1 && flag(E, 'ln-soap').n === 1, 'an amount set in one unit never meets the other phone’s unit: 5 each is 1 case, not 5 cases (it holds ' + eSoap.n + ' ' + eSoap.unit + ')');
+  const sc = E.S.conflicts.find((c) => c.review && /ln-soap\]\.flag\.n$/.test(c.path)) || {};
+  check(sc.ours === 1 && sc.theirs === 2, '…and the clash compares them in cases: yours 1, theirs 2');
+  await both(E, F);
+  check(same(lineIn(invGH(), 'ln-soap').flag, lineIn(F.S.inv.local, 'ln-soap').flag) && same(lineIn(E.S.inv.local, 'ln-soap').flag, lineIn(F.S.inv.local, 'ln-soap').flag), '…and both phones and GitHub end up the same');
 }
 
 T.done();

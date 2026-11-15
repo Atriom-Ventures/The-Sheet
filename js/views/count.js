@@ -1,26 +1,25 @@
-// Inventory count: count stock against the order sheet, see what to order, keep history.
+// Inventory count: count stock, flag what to order, keep history.
+// The data and math (places, what's on hand, flags, order records, unit math) live in ../stock.js.
 
 import { app } from '../app.js';
-import { S, I, C, save, edit, hasInv, newCount, signName, whoAmI } from '../state.js';
+import { S, I, C, save, edit, hasInv, signName, whoAmI } from '../state.js';
+import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, placeName, placeOf, freqName, roomNow, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, orderList, orderText, placeOrder, saveCount, stampLine } from '../stock.js';
 import { autoSync, canWrite, perm, connOf } from '../sync.js';
 import { setAtPath, markGone } from '../merge.js';
 import { esc, fmtNum, parseQty, round2, fmtShort, dateOf, uid, slug, copyText, shareText, todayKey, $, cssEsc, debounce, ago, daysSince, clone } from '../util.js';
 import { ICON, seg, chip, empty, toast, armed, opts, field, openSheet, closeSheet, setSheetBody, isSheetOpen } from '../ui.js';
 
-const UNITS = ['case', 'sleeve', 'long sleeve', 'box', 'pack', 'bag', 'bottle', 'can', 'carton', 'roll', 'stack', 'each'];
-const PLURAL = { case: 'cases', sleeve: 'sleeves', 'long sleeve': 'long sleeves', box: 'boxes', pack: 'packs', bag: 'bags', bottle: 'bottles', can: 'cans', carton: 'cartons', roll: 'rolls', stack: 'stacks', each: 'each' };
 const STATES = [['active', 'On the order sheet'], ['disc', 'Crossed off the sheet'], ['ask', 'Not on the sheet: ask first'], ['useup', 'Not on the sheet: use up'], ['remove', 'Not on the sheet: remove']];
 const STATE_SHORT = { disc: 'Crossed off', ask: 'Ask first', useup: 'Use up', remove: 'Remove' };
 // The shared files can be edited by anyone with access, even by hand on github.com, so every value
 // from them is shown as text. A status the app doesn't know gets a plain tag.
 const stateTag = (s) => '<span class="tag t-' + (STATE_SHORT[s] ? s : 'other') + '">' + esc(STATE_SHORT[s] || '') + '</span>';
-const STATUS_LABEL = { todo: 'Not counted', partial: 'Partly', nopar: 'No min', out: 'Out', low: 'Low', ok: 'OK', plenty: 'Plenty' };
+const STATUS_LABEL = { todo: 'Not counted', partial: 'Partly', ok: 'Counted' };
 const SUBS = [['count', 'Count'], ['order', 'Order'], ['history', 'History'], ['items', 'Items']];
 
 let filter = 'all', q = '', openItem = null, confirmNew = false;
+let typedIn = null; // { id, n }: the order box being typed in, and the amount it had before
 
-function unitWord(u, n) { if (u === 'each') return 'each'; if (n != null && n > 0 && n <= 1) return u; return PLURAL[u] || (u + 's'); }
-const fmtQty = (n, u) => fmtNum(n) + ' ' + unitWord(u, n);
 const lines = () => I().lines;
 const findLineOfProduct = (pid) => lines().find((l) => l.products.some((p) => p.id === pid));
 const productOf = (pid) => { const l = findLineOfProduct(pid); return l ? l.products.find((p) => p.id === pid) : null; };
@@ -28,7 +27,6 @@ const productOf = (pid) => { const l = findLineOfProduct(pid); return l ? l.prod
 /* ---------- order on screen ----------
    Sections and lines show A to Z (numbers in order, so 8 oz comes before 12 oz). The file's own order
    doesn't matter. A line whose section is missing (deleted, or a hand edit) shows under "No section". */
-const byName = (a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
 const sortLines = (ls) => ls.slice().sort(byName);
 export function sections() {
   const cats = I().cats.slice().sort(byName), ids = new Set(cats.map((c) => c.id));
@@ -37,86 +35,30 @@ export function sections() {
 }
 const inSection = (l, c) => (c.missing ? !I().cats.some((x) => x.id === l.cat) : l.cat === c.id);
 
-/* ---------- cases and loose units ----------
-   A product's per-case number says how many of the smaller unit come in a case. On a line counted in
-   cases, the smaller unit is the line's loose unit (sleeves unless set); otherwise it's the line's own
-   unit. With a per-case number, full cases and loose units are counted separately and added up. The
-   count is still stored as one number in the line's unit, so orders and saved counts work as before. */
-const perCaseOf = (p) => { const n = Number(p && p.perCase); return Number.isFinite(n) && n > 0 ? n : 0; };
-const smallUnit = (line) => (line.unit === 'case' ? (UNITS.includes(line.inner) && line.inner !== 'case' ? line.inner : 'sleeve') : line.unit);
-const r6 = (n) => Math.round(n * 1e6) / 1e6;
-function splitParts(line, p, v) {
-  const n = perCaseOf(p), small = line.unit === 'case' ? v * n : v;
-  const cases = Math.floor(small / n + 1e-6);
-  return { cases, loose: Math.max(0, round2(small - cases * n)) };
-}
-const fromSplit = (line, p, cases, loose) => { const n = perCaseOf(p); return r6(line.unit === 'case' ? cases + loose / n : cases * n + loose); };
-function fmtSplit(line, p, v) {
-  const s = splitParts(line, p, v), small = smallUnit(line);
-  if (!s.loose && !s.cases) return fmtQty(0, line.unit);
-  if (!s.loose) return fmtQty(s.cases, 'case');
-  return (s.cases ? fmtQty(s.cases, 'case') + ' + ' : '') + fmtNum(s.loose) + ' ' + unitWord(small, s.loose);
-}
-/* What's on hand for a line, in words: "2 cases + 7 sleeves" when it's one product with a per-case number. */
-const fmtHave = (line, total) => (line.products.length === 1 && perCaseOf(line.products[0]) ? fmtSplit(line, line.products[0], total) : fmtQty(total, line.unit));
-/* How many `to` make one `from` for a product, or null when that can't be known. */
-function factor(from, to, small, n) {
-  if (from === to) return 1;
-  if (!n) return null;
-  if (from === 'case' && to === small) return n;
-  if (to === 'case' && from === small) return 1 / n;
-  return null;
-}
 const hist = () => (C().history || []).slice().sort((a, b) => String(b.savedAt || b.date).localeCompare(String(a.savedAt || a.date)));
 
+/* How far a line is counted in a count. Minimums stay in the file but nothing here reads them: what
+   to order is flagged by hand (see flags in stock.js). */
 export function lineStat(line, counts) {
   let total = 0, n = 0;
   for (const p of line.products) { const v = counts[p.id]; if (v != null) { total += v; n++; } }
   total = r6(total); // not rounded to cents: 1 case + 14 of 15 must add back up to 14 loose
   const counted = line.products.length > 0 && n === line.products.length;
-  let status;
-  if (!counted) status = n ? 'partial' : 'todo';
-  else if (line.par == null) status = 'nopar';
-  else if (line.par > 0 && total <= 0) status = 'out';
-  else if (total < line.par) status = 'low';
-  else if (line.par > 0 && total >= line.par * 3) status = 'plenty';
-  else status = 'ok';
-  return { total, n, counted, status };
+  return { total, n, counted, status: counted ? 'ok' : (n ? 'partial' : 'todo') };
 }
-const prefProduct = (line) => line.products.find((p) => p.pref) || (line.products.length === 1 ? line.products[0] : null);
-function suggestOrder(line, st) {
-  const short = line.par - st.total, p = prefProduct(line);
-  if (p && perCaseOf(p) && line.unit !== 'case') return { n: Math.max(1, Math.ceil(short / perCaseOf(p) - 1e-9)), unit: 'case' };
-  return { n: Math.max(1, Math.ceil(short - 1e-9)), unit: line.unit };
-}
-/* The last saved count of a product, in the line's unit today. Saved counts remember the unit they
-   were counted in; one in another unit is converted with the per-case number, or left out. */
+/* The last saved count of a product in the place on screen, in the line's unit today (see savedVal).
+   null when there isn't one, or it can't be read in today's unit: then it isn't offered. */
 function lastFor(pid) {
-  const l = findLineOfProduct(pid), p = productOf(pid);
+  const l = findLineOfProduct(pid), p = productOf(pid), place = roomNow();
+  if (!l) return null;
   for (const h of hist()) {
-    if (!h.counts || h.counts[pid] == null) continue;
-    let v = Number(h.counts[pid]); if (!Number.isFinite(v)) return null;
-    const from = h.units && h.units[pid];
-    if (!l) return { val: v, date: h.date };
-    // Saved before units were recorded: the number is in whatever unit the line had then. If the line
-    // has been changed since (it may have moved from sleeves to cases), it can't be trusted, so it
-    // isn't offered. The next saved count records its units and the button comes back.
-    if (!from) return l.updated && String(l.updated).slice(0, 10) >= String(h.date || '').slice(0, 10) ? null : { val: v, date: h.date };
-    const n = perCaseOf(p), was = Number(h.per && h.per[pid]);
-    const f = factor(from, l.unit, smallUnit(l), n);
-    if (f == null) return null;
-    // Counted with a different per-case number: keep the cases and loose units that were counted.
-    if (was > 0 && n > 0 && was !== n) { const s = partsOf(from === 'case', was, v); return { val: fromParts(l.unit === 'case', n, s), date: h.date }; }
-    return { val: r6(v * f), date: h.date };
+    if (isOrder(h) || placeOf(h) !== place) continue;
+    const v = savedVal(h, l, p);
+    if (v === undefined) continue;
+    return v == null ? null : { val: v, date: h.date };
   }
   return null;
 }
-/* Full cases and loose units behind a number, and back, for a given per-case number. */
-function partsOf(inCases, n, v) {
-  const small = inCases ? v * n : v, c = Math.floor(small / n + 1e-6);
-  return { c, l: Math.max(0, round2(small - c * n)) };
-}
-const fromParts = (inCases, n, s) => r6(inCases ? s.c + s.l / n : s.c * n + s.l);
 /* What a count was made of when it was entered: the per-case number then, and the cases and loose
    units it came to. `at` is the per-case number the stored count is worked out with right now. */
 function snapOf(line, p, v) {
@@ -131,73 +73,53 @@ function snapOf(line, p, v) {
    "1 case + 3.6". Each count remembers the cases and loose units it was entered as, and is worked out
    again from those. */
 export function reconcileUnits() {
-  const cnt = S.count; if (!cnt || !cnt.counts) return;
-  const u = cnt.units || (cnt.units = {}), per = cnt.per || (cnt.per = {});
   let changed = false; const cleared = [];
-  for (const pid of Object.keys(cnt.counts)) {
-    const l = findLineOfProduct(pid);
-    if (!l) continue;
-    const p = productOf(pid), n = perCaseOf(p);
-    if (!u[pid]) { u[pid] = l.unit; changed = true; }
-    else if (u[pid] !== l.unit) {
-      const f = factor(u[pid], l.unit, smallUnit(l), n);
-      if (f == null) { delete cnt.counts[pid]; delete u[pid]; delete per[pid]; if (cleared.indexOf(l.name) < 0) cleared.push(l.name); changed = true; continue; }
-      cnt.counts[pid] = r6(cnt.counts[pid] * f); u[pid] = l.unit; changed = true;
+  // Both places' counts in progress: the one waiting must not come back in a unit it wasn't counted in.
+  for (const cnt of allInProgress()) {
+    if (!cnt.counts) continue;
+    const u = cnt.units || (cnt.units = {}), per = cnt.per || (cnt.per = {});
+    for (const pid of Object.keys(cnt.counts)) {
+      const l = findLineOfProduct(pid);
+      if (!l) continue;
+      const p = productOf(pid), n = perCaseOf(p);
+      if (!u[pid]) { u[pid] = l.unit; changed = true; }
+      else if (u[pid] !== l.unit) {
+        const f = factor(u[pid], l.unit, smallUnit(l), n);
+        if (f == null) { delete cnt.counts[pid]; delete u[pid]; delete per[pid]; if (cleared.indexOf(l.name) < 0) cleared.push(l.name); changed = true; continue; }
+        cnt.counts[pid] = r6(cnt.counts[pid] * f); u[pid] = l.unit; changed = true;
+      }
+      const rec = per[pid];
+      if (!rec || typeof rec !== 'object') { per[pid] = snapOf(l, p, cnt.counts[pid]); changed = true; }
+      else if (rec.at !== n) {
+        if (n > 0 && rec.n > 0) cnt.counts[pid] = fromParts(l.unit === 'case', n, rec);
+        rec.at = n; changed = true;
+      }
     }
-    const rec = per[pid];
-    if (!rec || typeof rec !== 'object') { per[pid] = snapOf(l, p, cnt.counts[pid]); changed = true; }
-    else if (rec.at !== n) {
-      if (n > 0 && rec.n > 0) cnt.counts[pid] = fromParts(l.unit === 'case', n, rec);
-      rec.at = n; changed = true;
-    }
+    for (const pid of Object.keys(u)) if (cnt.counts[pid] == null) { delete u[pid]; changed = true; }
+    for (const pid of Object.keys(per)) if (cnt.counts[pid] == null) { delete per[pid]; changed = true; }
   }
-  for (const pid of Object.keys(u)) if (cnt.counts[pid] == null) { delete u[pid]; changed = true; }
-  for (const pid of Object.keys(per)) if (cnt.counts[pid] == null) { delete per[pid]; changed = true; }
   if (changed) save('count');
   if (cleared.length) setTimeout(() => toast(cleared.length === 1 ? 'How ' + cleared[0] + ' is counted changed, so its count was cleared. Count it again.' : cleared.length + ' lines changed how they’re counted, so their counts were cleared. Count them again.', 4000), 0);
 }
 function seenFor(pid) { const s = I().seen; return s && s.items && s.items[pid] ? { text: s.items[pid], date: s.date } : null; }
 const activeLines = () => lines().filter((l) => l.state === 'active');
 function progress() {
-  let counted = 0, low = 0, nopar = 0; const act = activeLines();
-  for (const l of act) { const st = lineStat(l, S.count.counts); if (st.counted) counted++; if (st.status === 'low' || st.status === 'out') low++; if (l.par == null) nopar++; }
-  return { counted, total: act.length, low, todo: act.length - counted, nopar };
+  let counted = 0, flagged = 0; const act = activeLines();
+  for (const l of act) { if (lineStat(l, S.count.counts).counted) counted++; if (flagOf(l)) flagged++; }
+  return { counted, total: act.length, flagged, todo: act.length - counted };
 }
-/* An amount changed by hand is in the unit it was shown in. If that unit changes (say a per-case
-   number is added, so the line is ordered by the case), the number no longer means the same thing,
-   so the suggestion comes back instead of reading it in the new unit. */
-function handSet(l, sug) {
-  const ov = S.count.orders[l.id], unit = (S.count.orderUnits || {})[l.id];
-  return ov != null && (unit == null || unit === sug.unit) ? ov : null;
-}
-function computeOrder() {
-  const r = { order: [], plenty: [], nopar: [], pick: [], todo: [], ok: 0, counted: 0, total: 0 };
+/* What a saved count says in History: where, who, and each line that was counted. */
+function countText() {
+  const out = []; let counted = 0;
   for (const l of sortLines(lines())) {
-    if (l.state !== 'active') continue;
-    r.total++;
-    if (l.products.length > 1 && !l.products.some((p) => p.pref)) r.pick.push(l);
     const st = lineStat(l, S.count.counts);
-    if (!st.counted) { r.todo.push(l); continue; }
-    r.counted++;
-    if (st.status === 'nopar') r.nopar.push({ l, st });
-    else if (st.status === 'low' || st.status === 'out') { const sug = suggestOrder(l, st); const ov = handSet(l, sug); r.order.push({ l, st, sug, qty: ov != null ? ov : sug.n }); }
-    else if (st.status === 'plenty') r.plenty.push({ l, st });
-    else r.ok++;
+    if (!st.n) continue;
+    if (l.state === 'active' && st.counted) counted++;
+    out.push('• ' + l.name + ': ' + fmtHave(l, st.total));
   }
-  return r;
-}
-function orderText(r) {
-  const out = [(I().title || 'Inventory') + ' order · ' + new Date(S.count.started).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })];
   const by = signName() || whoAmI();
-  out.push((by ? 'Counted by ' + by + ' · ' : '') + r.counted + ' of ' + r.total + ' items counted', '');
-  const ord = r.order.filter((o) => o.qty > 0);
-  out.push('ORDER');
-  if (!ord.length) out.push(r.counted ? 'Nothing counted is below its minimum.' : 'Nothing counted yet.');
-  for (const o of ord) { const p = prefProduct(o.l); const pd = p ? [p.brand, p.code].filter(Boolean).join(' ') : ''; out.push('• ' + o.l.name + ': ' + fmtQty(o.qty, o.sug.unit) + (pd ? ' (' + pd + ')' : '') + ' · have ' + fmtHave(o.l, o.st.total) + ', min ' + fmtQty(o.l.par, o.l.unit)); }
-  if (r.plenty.length) { out.push('', "PLENTY ON HAND, DON'T ORDER"); for (const o of r.plenty) out.push('• ' + o.l.name + ': ' + fmtHave(o.l, o.st.total) + ' (min ' + fmtQty(o.l.par, o.l.unit) + ')'); }
-  if (r.nopar.length) { out.push('', 'ON HAND, NO MINIMUM SET YET'); for (const o of r.nopar) out.push('• ' + o.l.name + ': ' + fmtHave(o.l, o.st.total)); }
-  if (r.todo.length) out.push('', 'NOT COUNTED (' + r.todo.length + ')', r.todo.map((l) => l.name).join(' · '));
-  return out.join('\n');
+  return [(I().title || 'Inventory') + ' count · ' + placeName(roomNow()) + ' · ' + new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
+    (by ? 'Counted by ' + by + ' · ' : '') + counted + ' of ' + activeLines().length + ' items counted', ''].concat(out).join('\n');
 }
 
 /* For the Now screen. */
@@ -205,8 +127,8 @@ export function countSummary() {
   if (!hasInv()) return '';
   reconcileUnits();
   const p = progress();
-  if (!p.counted) return '<button class="glance-b" data-act="go" data-id="#count"><span class="g-k">' + ICON.count + ' Count</span><span class="g-v">Not started</span></button>';
-  return '<button class="glance-b" data-act="go" data-id="#count/order"><span class="g-k">' + ICON.count + ' Count</span><span class="g-v">' + p.counted + '/' + p.total + (p.low ? ' · <b class="warn-t">' + p.low + ' low</b>' : '') + '</span></button>';
+  if (!p.counted && !p.flagged) return '<button class="glance-b" data-act="go" data-id="#count"><span class="g-k">' + ICON.count + ' Count</span><span class="g-v">Not started</span></button>';
+  return '<button class="glance-b" data-act="go" data-id="#count/order"><span class="g-k">' + ICON.count + ' Count</span><span class="g-v">' + p.counted + '/' + p.total + (p.flagged ? ' · <b>' + p.flagged + ' to order</b>' : '') + '</span></button>';
 }
 
 /* ---------- access ----------
@@ -222,8 +144,10 @@ function accessNote() {
 }
 
 /* ---------- order status ----------
-   A saved count with something to order is an order: not placed yet → placed → received.
-   An unplaced order is replaced as soon as anyone saves a newer count that has its own order. */
+   An order is a record in History with an order on it: placed → received. "Order placed" files one
+   (placeOrder in stock.js). Saved counts from before flags could carry an order too, starting as not
+   placed yet; those still show and can still be marked. An unplaced order is replaced as soon as
+   there's a newer order. */
 // Timestamps are UTC (…Z); show them in the phone's own day, or an evening order reads as tomorrow.
 const localDate = (v) => (/T/.test(String(v || '')) ? new Date(v) : dateOf(v));
 const dayName = (iso) => localDate(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
@@ -240,7 +164,7 @@ function orderLine(e, st) {
   if (st === 'saved') return 'Not placed yet';
   if (st === 'placed') return 'Placed ' + dayName(o.placedAt) + (o.placedBy ? ' by ' + o.placedBy : '');
   if (st === 'received') return 'Received ' + dayName(o.receivedAt) + (o.receivedBy ? ' by ' + o.receivedBy : '');
-  if (st === 'replaced') return 'Replaced by a newer count';
+  if (st === 'replaced') return 'Replaced by a newer order';
   return '';
 }
 const ORDER_CLASS = { saved: 'warn', placed: 'go', received: 'ok', replaced: 'muted' };
@@ -262,7 +186,7 @@ function openOrdersHTML() {
   if (!open.length) return '';
   return open.slice(0, 2).map((e) => {
     const st = orderState(e);
-    return '<div class="ord-open s-' + st + '"><div class="ord-open-h"><b>' + esc(st === 'placed' ? 'An order is on its way' : 'A saved order hasn’t been placed') + '</b><span>' + esc(dayName(e.savedAt || e.date)) + (e.by ? ' · counted by ' + esc(e.by) : '') + ' · ' + esc(e.orderCount) + ' item' + (e.orderCount === 1 ? '' : 's') + '</span><span class="ord-st">' + esc(orderLine(e, st)) + '</span></div><div class="row-actions">' + orderButtons(e, st, true) + '<button class="btn small ghost" data-act="go" data-id="#count/history">See it</button></div></div>';
+    return '<div class="ord-open s-' + st + '"><div class="ord-open-h"><b>' + esc(st === 'placed' ? 'An order is on its way' : 'A saved order hasn’t been placed') + '</b><span>' + esc(dayName(e.savedAt || e.date)) + (e.by && !isOrder(e) ? ' · counted by ' + esc(e.by) : '') + ' · ' + esc(e.orderCount) + ' item' + (e.orderCount === 1 ? '' : 's') + '</span><span class="ord-st">' + esc(orderLine(e, st)) + '</span></div><div class="row-actions">' + orderButtons(e, st, true) + '<button class="btn small ghost" data-act="go" data-id="#count/history">See it</button></div></div>';
   }).join('');
 }
 function setOrder(id, fn) {
@@ -272,7 +196,7 @@ function setOrder(id, fn) {
 }
 
 /* ---------- clashes: both phones changed the same thing between syncs ---------- */
-const FIELD = { name: 'name', par: 'minimum', unit: 'counted in', inner: 'loose unit', step: 'step', cat: 'section', state: 'status on the sheet', note: 'note', brand: 'brand', code: 'item #', perCase: 'per case', pref: '“order this one”', status: 'order status', placedBy: 'placed by', receivedBy: 'received by', placedAt: 'placed date', receivedAt: 'received date' };
+const FIELD = { n: 'order amount', flag: 'order list', freq: 'how often', name: 'name', par: 'minimum', unit: 'counted in', inner: 'loose unit', step: 'step', cat: 'section', state: 'status on the sheet', note: 'note', brand: 'brand', code: 'item #', perCase: 'per case', pref: '“order this one”', status: 'order status', placedBy: 'placed by', receivedBy: 'received by', placedAt: 'placed date', receivedAt: 'received date' };
 const reviewList = () => (S.conflicts || []).filter((c) => c.review);
 function clashLabel(c) {
   const doc = S[c.key] && S[c.key].local;
@@ -284,11 +208,13 @@ function clashLabel(c) {
     if (l) { where = l.name; if (ids[1]) { const p = l.products.find((x) => x.id === ids[1]); if (p && p.name) where += ', ' + p.name; } }
   } else if (c.key === 'counts' && doc) {
     const e = (doc.history || []).find((x) => x.id === ids[0]);
-    if (e) where = 'Count from ' + dayName(e.savedAt || e.date);
+    if (e) where = (isOrder(e) ? 'Order from ' : 'Count from ') + dayName(e.savedAt || e.date);
   }
   return (where || 'An item') + (field && FIELD[field] ? ': ' + FIELD[field] : '');
 }
 const showVal = (v) => (v == null || v === '' ? 'blank' : typeof v === 'object' ? 'a different version' : v === true ? 'yes' : String(v));
+/* A clash's value in words: how often shows as its name, not the id the file keeps. */
+const clashVal = (c, v) => (/\.freq$/.test(c.path) && typeof v === 'string' ? freqName(v) : showVal(v));
 function reviewHTML() {
   const list = reviewList();
   if (!list.length) return '';
@@ -296,7 +222,7 @@ function reviewHTML() {
     list.map((c) => {
       const who = c.who || 'Them';
       if (c.note) return '<div class="clash-i"><div class="clash-t">' + esc(clashLabel(c)) + '</div><div class="clash-v">' + esc(c.note) + '.</div><div class="row-actions"><button class="btn small" data-act="clash-mine" data-id="' + esc(c.id) + '">OK</button></div></div>';
-      return '<div class="clash-i"><div class="clash-t">' + esc(clashLabel(c)) + '</div><div class="clash-v">Yours: <b>' + esc(showVal(c.ours)) + '</b> · ' + esc(who) + '’s: <b>' + esc(showVal(c.theirs)) + '</b></div>' +
+      return '<div class="clash-i"><div class="clash-t">' + esc(clashLabel(c)) + '</div><div class="clash-v">Yours: <b>' + esc(clashVal(c, c.ours)) + '</b> · ' + esc(who) + '’s: <b>' + esc(clashVal(c, c.theirs)) + '</b></div>' +
         '<div class="row-actions"><button class="btn small" data-act="clash-mine" data-id="' + esc(c.id) + '">Keep mine</button><button class="btn small ghost" data-act="clash-theirs" data-id="' + esc(c.id) + '">Use ' + esc(who) + '’s</button></div></div>';
     }).join('') + '</section>';
 }
@@ -315,7 +241,6 @@ function productDesc(line, p, withName) {
 }
 function lineHead(line, st) {
   const multi = line.products.length > 1, bits = [], side = [];
-  if (line.state === 'active') bits.push(esc(line.par != null ? 'min ' + fmtQty(line.par, line.unit) : 'no min set'));
   if (line.note) bits.push(esc(line.note));
   if (!multi) { const d = productDesc(line, line.products[0], true); if (d) bits.push(d); }
   if (line.state !== 'active') side.push(stateTag(line.state));
@@ -357,9 +282,17 @@ function productRow(line, p, multi) {
     '<div class="quick" id="QK-' + esc(p.id) + '">' + quick(line, p) + '</div>' +
     (seen && !lastFor(p.id) && v == null ? '<div class="seen">In the ' + fmtShort(seen.date) + ' photos: ' + esc(seen.text) + '</div>' : '') + '</div>';
 }
+/* The Order button under a line: on means it's on the order list, for everyone who orders. */
+const flagNote = (line) => { const f = flagOf(line); return f ? 'To order: ' + fmtQty(f.n, f.unit) : ''; };
+function flagRow(line) {
+  if (line.state !== 'active') return '';
+  const f = flagOf(line), note = '<span class="lflag-n" id="LF-' + esc(line.id) + '">' + esc(flagNote(line)) + '</span>';
+  if (ro()) return f ? '<div class="lflag">' + note + '</div>' : '';
+  return '<div class="lflag"><button class="chip" data-act="inv-flag" data-line="' + esc(line.id) + '" aria-pressed="' + (f ? 'true' : 'false') + '" aria-label="' + esc('Order ' + line.name) + '">Order</button>' + note + '</div>';
+}
 function lineCard(line) {
   const st = lineStat(line, S.count.counts), multi = line.products.length > 1;
-  return '<article class="line s-' + (line.state === 'active' ? st.status : 'extra') + (multi ? ' multi' : '') + '" id="L-' + esc(line.id) + '"><div class="lh" id="LH-' + esc(line.id) + '">' + lineHead(line, st) + '</div>' + line.products.map((p) => productRow(line, p, multi)).join('') + '</article>';
+  return '<article class="line s-' + (line.state === 'active' ? st.status : 'extra') + (multi ? ' multi' : '') + '" id="L-' + esc(line.id) + '"><div class="lh" id="LH-' + esc(line.id) + '">' + lineHead(line, st) + '</div>' + line.products.map((p) => productRow(line, p, multi)).join('') + flagRow(line) + '</article>';
 }
 function matches(line) {
   const n = q.trim().toLowerCase();
@@ -367,13 +300,13 @@ function matches(line) {
   if (filter === 'all') return true;
   const st = lineStat(line, S.count.counts);
   if (filter === 'todo') return line.state === 'active' && !st.counted;
-  if (filter === 'low') return st.status === 'low' || st.status === 'out';
+  if (filter === 'flag') return !!flagOf(line);
   if (filter === 'multi') return line.products.length > 1;
   return true;
 }
 function progressHTML() {
   const p = progress();
-  return '<div class="prog" id="prog"><div class="prog-row"><span class="prog-big">' + p.counted + '</span><span class="prog-of">of ' + p.total + ' counted</span><span class="prog-stats">' + (p.low ? '<b>' + p.low + '</b> low · ' : '') + p.todo + ' to go</span></div><div class="prog-bar"><i style="width:' + (p.total ? p.counted / p.total * 100 : 0).toFixed(1) + '%"></i></div></div>';
+  return '<div class="prog" id="prog"><div class="prog-row"><span class="prog-big">' + p.counted + '</span><span class="prog-of">of ' + p.total + ' counted</span><span class="prog-stats">' + (p.flagged ? '<b>' + p.flagged + '</b> to order · ' : '') + p.todo + ' to go</span></div><div class="prog-bar"><i style="width:' + (p.total ? p.counted / p.total * 100 : 0).toFixed(1) + '%"></i></div></div>';
 }
 function countList() {
   let h = '';
@@ -389,7 +322,7 @@ function countList() {
 }
 function countTab() {
   return progressHTML() + '<div class="tools"><label class="sr" for="inv-q">Search</label><input id="inv-q" class="search-in" type="search" data-search="inv" placeholder="Search items" value="' + esc(q) + '" autocomplete="off">' +
-    '<div class="chips">' + [['all', 'All'], ['todo', 'To count'], ['low', 'Low'], ['multi', 'Several products']].map(([k, l]) => chip('inv-filter', k, l, filter === k)).join('') + '</div></div>' +
+    '<div class="chips">' + [['all', 'All'], ['todo', 'To count'], ['flag', 'To order'], ['multi', 'Several products']].map(([k, l]) => chip('inv-filter', k, l, filter === k)).join('') + '</div></div>' +
     '<div class="inv-list" id="inv-list">' + countList() + '</div>';
 }
 /* One count, in the line's unit. Remembers that unit so a later unit change can convert it. */
@@ -425,60 +358,57 @@ function refreshProduct(pid) {
   const prog = document.getElementById('prog'); if (prog) prog.outerHTML = progressHTML();
   const ob = $('[data-act="go-csub"][data-id="order"]'); if (ob) ob.textContent = orderLabel();
 }
-const orderLabel = () => { const n = computeOrder().order.filter((o) => o.qty > 0).length; return 'Order' + (n ? ' (' + n + ')' : ''); };
+const orderLabel = () => { const n = orderList().length; return 'Order' + (n ? ' (' + n + ')' : ''); };
 
-/* ---------- order tab ---------- */
-function orderRow(o) {
-  const p = prefProduct(o.l), pd = p ? [p.brand, p.code].filter(Boolean).join(' ') : '';
-  const extra = pd ? ' · ' + esc(pd) : (o.l.products.length > 1 ? ' · <em>pick which product</em>' : '');
-  return '<div class="orow' + (o.qty > 0 ? '' : ' skip') + '" id="O-' + esc(o.l.id) + '"><span class="otick" aria-hidden="true"></span><div class="oinfo"><div class="lname">' + esc(o.l.name) + '</div><div class="lmeta">have ' + esc(fmtHave(o.l, o.st.total)) + ' · min ' + esc(fmtQty(o.l.par, o.l.unit)) + extra + '</div></div>' +
-    '<div class="pctl oqty"><div class="stepper"><button class="step" data-act="ord-dec" data-line="' + esc(o.l.id) + '" aria-label="Order minus one, ' + esc(o.l.name) + '">−</button><input class="qty" id="oq-' + esc(o.l.id) + '" data-oline="' + esc(o.l.id) + '" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="' + esc(fmtNum(o.qty)) + '" aria-label="Order amount for ' + esc(o.l.name) + '"><button class="step" data-act="ord-inc" data-line="' + esc(o.l.id) + '" aria-label="Order plus one, ' + esc(o.l.name) + '">+</button></div><span class="unit">' + esc(unitWord(o.sug.unit, 2)) + '</span></div></div>';
+/* ---------- order tab ----------
+   The list is the flagged lines, shared by everyone who orders. Nothing lands here on its own. */
+function orderRow(o, have) {
+  const p = prefProduct(o.l), pd = p ? [p.brand, p.code].filter(Boolean).join(' ') : '', id = esc(o.l.id);
+  const meta = [have != null ? esc('have ' + fmtHave(o.l, have)) : '', pd ? esc(pd) : (o.l.products.length > 1 ? '<em>pick which product</em>' : '')].filter(Boolean).join(' · ');
+  const qty = ro() ? '<span class="ltotal">' + esc(fmtQty(o.n, o.unit)) + '</span>'
+    : '<div class="pctl oqty"><div class="stepper"><button class="step" data-act="ord-dec" data-line="' + id + '" aria-label="Order minus one, ' + esc(o.l.name) + '">−</button><input class="qty" id="oq-' + id + '" data-oline="' + id + '" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="' + esc(fmtNum(o.n)) + '" aria-label="Order amount for ' + esc(o.l.name) + '"><button class="step" data-act="ord-inc" data-line="' + id + '" aria-label="Order plus one, ' + esc(o.l.name) + '">+</button></div><span class="unit">' + esc(unitWord(o.unit, 2)) + '</span></div>';
+  return '<div class="orow" id="O-' + id + '"><span class="otick" aria-hidden="true"></span><div class="oinfo"><div class="lname">' + esc(o.l.name) + '</div>' + (meta ? '<div class="lmeta">' + meta + '</div>' : '') + '</div>' + qty + '</div>';
 }
-const simpleRow = (name, value, small) => '<div class="srow2"><span>' + esc(name) + '</span><span class="v">' + esc(value) + (small ? '<small>' + esc(small) + '</small>' : '') + '</span></div>';
 function orderTab() {
-  const r = computeOrder();
-  let h = openOrdersHTML() + '<p class="hint">' + r.counted + ' of ' + r.total + ' items counted. Anything below its minimum lands here with a suggested amount you can change.</p>';
-  h += '<h2 class="sub-title go">To order <span class="n">' + r.order.length + '</span></h2>';
-  if (!r.counted) h += empty('Nothing counted yet. Count on the Count tab and anything below its minimum shows up here.');
-  else if (!r.order.length) h += empty('Nothing counted so far is below its minimum.');
-  else h += '<div class="olist">' + r.order.map(orderRow).join('') + '</div>';
-  if (r.plenty.length) h += '<h2 class="sub-title">Plenty on hand, don’t order <span class="n">' + r.plenty.length + '</span></h2><p class="hint">Three times the minimum or more.</p><div class="olist">' + r.plenty.map((o) => simpleRow(o.l.name, fmtHave(o.l, o.st.total), 'min ' + fmtQty(o.l.par, o.l.unit))).join('') + '</div>';
-  if (r.nopar.length) h += '<h2 class="sub-title">Counted, no minimum yet <span class="n">' + r.nopar.length + '</span></h2><p class="hint">Set a minimum in Items and they’ll be ordered automatically next time.</p><div class="olist">' + r.nopar.map((o) => simpleRow(o.l.name, fmtHave(o.l, o.st.total))).join('') + '</div>';
-  if (r.pick.length) h += '<h2 class="sub-title">Pick one product to reorder <span class="n">' + r.pick.length + '</span></h2><p class="hint">More than one product counts toward each of these. In Items, mark the one to keep buying with “Order this one”.</p><div class="olist">' + r.pick.map((l) => simpleRow(l.name, l.products.length + ' products')).join('') + '</div>';
-  h += '<h2 class="sub-title">Message for ' + esc(I().messaging || 'team chat') + '</h2><pre class="chit" id="order-text">' + esc(orderText(r)) + '</pre>';
-  h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button>' + (ro() ? '' : '<button class="btn" data-act="count-save">' + ICON.check + ' Save count</button>') + '</div>';
-  if (!ro()) h += '<p class="hint">Save count adds it to History, where everyone who orders can see it and mark it placed, and starts a fresh count.</p>';
-  if (r.todo.length) h += '<details class="todo-list"><summary>Not counted yet (' + r.todo.length + ')</summary><p>' + r.todo.map((l) => esc(l.name)).join(' · ') + '</p></details>';
+  const list = orderList(), have = totals({ live: true }).lines, p = progress();
+  const todo = sortLines(activeLines().filter((l) => !lineStat(l, S.count.counts).counted));
+  let h = openOrdersHTML() + '<p class="hint">' + (ro() ? 'Lines flagged to order show here.' : 'Tap Order on a line in Count to put it on this list. Nothing is added on its own.') + '</p>';
+  h += '<h2 class="sub-title go">To order <span class="n">' + list.length + '</span></h2>';
+  h += list.length ? '<div class="olist">' + list.map((o) => orderRow(o, have[o.l.id] ? have[o.l.id].sum.v : null)).join('') + '</div>' : empty('Nothing is flagged to order.');
+  h += '<h2 class="sub-title">Message for ' + esc(I().messaging || 'team chat') + '</h2><pre class="chit" id="order-text">' + esc(orderText(list)) + '</pre>';
+  h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button>' + (ro() || !list.length ? '' : '<button class="btn" data-act="order-place">' + ICON.check + ' Order placed</button>') + '</div>';
+  if (!ro()) h += '<p class="hint">Order placed files the order in History, where everyone who orders can see it and mark it received, and clears this list.</p>';
+  h += '<h2 class="sub-title">Count in progress</h2><p class="hint">' + p.counted + ' of ' + p.total + ' items counted.' + (ro() ? '' : ' Save count adds it to History and starts a fresh count.') + '</p>';
+  if (!ro()) h += '<div class="row-actions"><button class="btn" data-act="count-save">' + ICON.check + ' Save count</button></div>';
+  if (todo.length) h += '<details class="todo-list"><summary>Not counted yet (' + todo.length + ')</summary><p>' + todo.map((l) => esc(l.name)).join(' · ') + '</p></details>';
   h += confirmNew ? '<div class="confirm"><p>Clear every count in progress and start over? Saved counts stay in History.</p><div class="row-actions"><button class="btn" data-act="count-new-no">Keep counting</button><button class="btn danger solid" data-act="count-new-yes">Clear and start over</button></div></div>' : '<p><button class="link" data-act="count-new">Start a new count</button></p>';
   return h;
 }
-function setOrderQty(lineId, n) {
-  const o = computeOrder().order.find((x) => x.l.id === lineId);
-  S.count.orders[lineId] = Math.max(0, Math.round(n));
-  S.count.orderUnits = Object.assign({}, S.count.orderUnits, { [lineId]: o ? o.sug.unit : null });
-  save('count'); showOrderQty(lineId);
-}
-/* Back to the suggested amount (an order box left empty). */
-function clearOrderQty(lineId, force) {
-  delete S.count.orders[lineId];
-  if (S.count.orderUnits) delete S.count.orderUnits[lineId];
-  save('count'); showOrderQty(lineId, force);
-}
+/* Show a line's order amount again (after a change), and the message with it. */
 function showOrderQty(lineId, force) {
-  const o = computeOrder().order.find((x) => x.l.id === lineId), qty = o ? o.qty : 0;
-  const inp = document.getElementById('oq-' + lineId); if (inp && (force || document.activeElement !== inp)) inp.value = fmtNum(qty);
-  const row = document.getElementById('O-' + lineId); if (row) row.classList.toggle('skip', qty === 0);
-  const t = $('#order-text'); if (t) t.textContent = orderText(computeOrder());
+  const l = lines().find((x) => x.id === lineId), f = l ? flagOf(l) : null;
+  const inp = document.getElementById('oq-' + lineId); if (inp && f && (force || document.activeElement !== inp)) inp.value = fmtNum(f.n);
+  const t = $('#order-text'); if (t) t.textContent = orderText(orderList());
+}
+const NO_FLAG = 'View only: changing the order list needs write access.';
+function unflag(lineId) { setFlag(lineId, false); app.renderView(); toast('Taken off the order list.'); }
+/* Plus or minus one on a flagged line. Minus at 1 takes it off the list. */
+function stepFlag(lineId, d) {
+  if (ro()) { toast(NO_FLAG); return; }
+  const l = lines().find((x) => x.id === lineId), f = l ? flagOf(l) : null;
+  if (!f) return;
+  if (f.n + d < 1) { unflag(lineId); return; }
+  setFlagAmount(lineId, f.n + d); showOrderQty(lineId);
 }
 
 /* ---------- history ---------- */
 function historyTab() {
   const H = hist();
-  if (!H.length) return empty('No saved counts yet. Save one from the Order tab and it shows up here.');
-  return '<p class="hint">Saved counts from everyone who counts, newest first.</p>' + H.map((e) => {
+  if (!H.length) return empty('No saved counts or orders yet. Save a count or place an order from the Order tab and it shows up here.');
+  return '<p class="hint">Saved counts and orders from everyone, newest first.</p>' + H.map((e) => {
     const n = Object.keys(e.counts || {}).length, st = orderState(e, H);
     const tag = st !== 'none' ? '<span class="otag o-' + ORDER_CLASS[st] + '">' + esc(orderLine(e, st)) + '</span>' : '';
-    return '<details class="hist"><summary><span class="hdate">' + esc(dateOf(e.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })) + '</span><span class="hby">' + esc(e.by || '') + '</span><span class="hsum">' + n + ' products counted' + (e.orderCount ? ' · ' + esc(e.orderCount) + ' to order' : '') + '</span>' + tag + '</summary>' +
+    return '<details class="hist"><summary><span class="hdate">' + esc(dateOf(e.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })) + '</span><span class="hby">' + esc(e.by || '') + '</span><span class="hsum">' + (isOrder(e) ? 'Order · ' + esc(e.orderCount) + ' item' + (e.orderCount === 1 ? '' : 's') : n + ' products counted' + (e.orderCount ? ' · ' + esc(e.orderCount) + ' to order' : '')) + '</span>' + tag + '</summary>' +
       '<div class="hbody"><pre class="chit">' + esc(e.text || '') + '</pre>' + (st !== 'none' && st !== 'replaced' ? '<div class="row-actions">' + orderButtons(e, st, true) + '</div>' : '') + '<div class="row-actions"><button class="btn small" data-act="hist-copy" data-id="' + esc(e.id) + '">' + ICON.copy + ' Copy</button>' + (ro() ? '' : '<button class="btn small danger" data-act="hist-del" data-id="' + esc(e.id) + '">' + ICON.trash + ' Delete</button>') + '</div></div></details>';
   }).join('');
 }
@@ -539,6 +469,7 @@ export function changeUnit(id, to) {
   if (cleared) msg += ' Its count so far was cleared; count it again.';
   else if (converted) msg += ' Counts so far were converted.';
   if (parF == null && pcs.some(Boolean)) msg += ' Check the per-case number too.';
+  reconcileUnits(); // the other place's count in progress: converted or cleared the same way
   return msg;
 }
 function itemRow(l) {
@@ -585,7 +516,7 @@ function itemEditor(l) {
   h += '</div>';
   return h;
 }
-const stamp = (l) => { l.updated = todayKey(); const w = whoAmI(); if (w) l.by = w; else delete l.by; };
+const stamp = stampLine;
 const editLine = (id, fn) => edit('inv', (inv) => { const l = inv.lines.find((x) => x.id === id); if (l) { fn(l, inv); stamp(l); } });
 const editProduct = (pid, fn) => edit('inv', (inv) => { for (const l of inv.lines) { const p = l.products.find((x) => x.id === pid); if (p) { fn(p, l, inv); stamp(l); return; } } });
 function redrawItem(id) { const el = document.getElementById('I-' + id); const l = lines().find((x) => x.id === id); if (el && l) el.outerHTML = itemRow(l); }
@@ -639,28 +570,40 @@ export const acts = {
   },
   'inv-same': (el) => setCount(el.dataset.pid, +el.dataset.val, true),
   'inv-clear': (el) => setCount(el.dataset.pid, null),
-  'ord-inc': (el) => { const r = computeOrder().order.find((o) => o.l.id === el.dataset.line); if (r) setOrderQty(r.l.id, r.qty + 1); },
-  'ord-dec': (el) => { const r = computeOrder().order.find((o) => o.l.id === el.dataset.line); if (r) setOrderQty(r.l.id, Math.max(0, r.qty - 1)); },
-  'ord-copy': async () => { if (await copyText(orderText(computeOrder()))) toast('Order copied.'); },
-  'ord-share': async () => { const r = await shareText(orderText(computeOrder()), 'Order'); if (r === 'copied') toast('Order copied.'); },
+  // Put a line on the shared order list, or take it off. The button itself is updated, so focus stays on it.
+  'inv-flag': (el) => {
+    if (ro()) { toast(NO_FLAG); return; }
+    const id = el.dataset.line, l = lines().find((x) => x.id === id);
+    if (!l || !setFlag(id, !flagOf(l))) return;
+    el.setAttribute('aria-pressed', flagOf(l) ? 'true' : 'false');
+    const note = document.getElementById('LF-' + id); if (note) note.textContent = flagNote(l);
+    const prog = document.getElementById('prog'); if (prog) prog.outerHTML = progressHTML();
+    const ob = $('[data-act="go-csub"][data-id="order"]'); if (ob) ob.textContent = orderLabel();
+  },
+  'ord-inc': (el) => stepFlag(el.dataset.line, 1),
+  'ord-dec': (el) => stepFlag(el.dataset.line, -1),
+  'ord-copy': async () => { if (await copyText(orderText(orderList()))) toast('Order copied.'); },
+  'ord-share': async () => { const r = await shareText(orderText(orderList()), 'Order'); if (r === 'copied') toast('Order copied.'); },
+  // Order placed: files the order in History for everyone and clears the flags. Two taps: it empties a shared list.
+  'order-place': (el) => {
+    if (ro()) { toast('View only: placing an order needs write access. Copy the order instead.'); return; }
+    if (!orderList().length) { toast('Nothing is flagged to order.'); return; }
+    if (!armed(el, 'Tap again: order placed')) return;
+    placeOrder();
+    autoSync('save', 800);
+    toast('Order filed. The list is clear.'); app.go('#count/history');
+  },
   'count-save': () => {
     if (ro()) { toast('View only: saving counts needs write access. Copy the order instead.'); return; }
     reconcileUnits();
-    const r = computeOrder();
-    if (!Object.keys(S.count.counts).length) { toast('Count something first.'); return; }
-    const orderCount = r.order.filter((o) => o.qty > 0).length;
-    const units = {}; Object.keys(S.count.counts).forEach((pid) => { const l = findLineOfProduct(pid); if (l) units[pid] = l.unit; });
-    const per = {}; Object.keys(units).forEach((pid) => { const n = perCaseOf(productOf(pid)); if (n) per[pid] = n; });
-    const entry = { id: uid('h'), date: todayKey(), savedAt: new Date().toISOString(), by: whoAmI(), counts: Object.assign({}, S.count.counts), units, per, orders: Object.assign({}, S.count.orders), orderCount, text: orderText(r), updated: todayKey() };
-    if (orderCount) entry.order = { status: 'saved' };
-    edit('counts', (c) => { c.history = (c.history || []).concat([entry]); });
-    S.count = newCount(); save('count'); confirmNew = false;
+    if (!saveCount(countText())) { toast('Count something first.'); return; }
+    freshCount(); confirmNew = false;
     autoSync('save', 500);
     toast('Count saved. A fresh count is ready.'); app.go('#count/history');
   },
   'count-new': () => { confirmNew = true; app.renderView(); },
   'count-new-no': () => { confirmNew = false; app.renderView(); },
-  'count-new-yes': () => { S.count = newCount(); save('count'); confirmNew = false; toast('Started a new count.'); app.go('#count'); },
+  'count-new-yes': () => { freshCount(); confirmNew = false; toast('Started a new count.'); app.go('#count'); },
   'hist-copy': async (el) => { const e = hist().find((x) => x.id === el.dataset.id); if (e && await copyText(e.text || '')) toast('Copied.'); },
   'hist-del': (el) => { if (ro()) return; if (!armed(el, 'Delete this count?')) return; edit('counts', (c) => { c.history = (c.history || []).filter((x) => x.id !== el.dataset.id); markGone(c, el.dataset.id); }); autoSync('save', 800); app.renderView(); toast('Deleted.'); },
   'ord-placed': (el) => { setOrder(el.dataset.id, (o) => { o.status = 'placed'; o.placedAt = new Date().toISOString(); o.placedBy = whoAmI(); }); app.renderView(); toast('Marked placed.'); },
@@ -680,9 +623,9 @@ export const acts = {
   },
   'item-open': (el) => { if (ro()) { toast('View only: item changes need write access.'); return; } const prev = openItem; openItem = openItem === el.dataset.id ? null : el.dataset.id; if (prev) redrawItem(prev); redrawItem(el.dataset.id); },
   'item-add': (el) => { if (ro()) return; const id = uid('ln'); edit('inv', (inv) => { const l = { id, cat: el.dataset.cat, name: 'New item', unit: 'case', step: 1, par: null, state: 'active', note: '', products: [{ id: uid('p'), name: '', brand: '', code: '' }] }; stamp(l); inv.lines.push(l); }); openItem = id; app.renderView(); setTimeout(() => { const n = document.getElementById('ie-name-' + id); if (n) { n.focus(); n.select(); } }, 60); },
-  'item-del': (el) => { if (!armed(el, 'Delete this line?')) return; const id = el.dataset.id; const l = lines().find((x) => x.id === id); edit('inv', (inv) => { inv.lines = inv.lines.filter((x) => x.id !== id); }); if (l) l.products.forEach((p) => delete S.count.counts[p.id]); save('count'); openItem = null; app.renderView(); toast('Line deleted.'); },
+  'item-del': (el) => { if (!armed(el, 'Delete this line?')) return; const id = el.dataset.id; const l = lines().find((x) => x.id === id); edit('inv', (inv) => { inv.lines = inv.lines.filter((x) => x.id !== id); }); if (l) l.products.forEach((p) => forgetProduct(p.id)); openItem = null; app.renderView(); toast('Line deleted.'); },
   'prod-add': (el) => { editLine(el.dataset.line, (l) => { l.products.push({ id: uid('p'), name: '', brand: '', code: '' }); }); redrawItem(el.dataset.line); },
-  'prod-del': (el) => { if (!armed(el, 'Remove?')) return; const l = findLineOfProduct(el.dataset.pid); if (!l) return; if (l.products.length < 2) { toast('A line needs at least one product. Delete the line instead.'); return; } editLine(l.id, (x) => { x.products = x.products.filter((p) => p.id !== el.dataset.pid); }); delete S.count.counts[el.dataset.pid]; save('count'); redrawItem(l.id); }
+  'prod-del': (el) => { if (!armed(el, 'Remove?')) return; const l = findLineOfProduct(el.dataset.pid); if (!l) return; if (l.products.length < 2) { toast('A line needs at least one product. Delete the line instead.'); return; } editLine(l.id, (x) => { x.products = x.products.filter((p) => p.id !== el.dataset.pid); }); forgetProduct(el.dataset.pid); redrawItem(l.id); }
 };
 
 // The number keypad has digits and a decimal point only, so the hint sticks to those.
@@ -721,7 +664,7 @@ function afterUnitEdit(id, typing) {
 let howLine = null;
 function howSummary(l) {
   const small = smallUnit(l), withPc = l.products.filter(perCaseOf);
-  let h = '<p class="hint">' + esc(l.par != null ? 'Minimum ' + fmtQty(l.par, l.unit) + '.' : 'No minimum set yet.') + ' ';
+  let h = '<p class="hint">';
   if (withPc.length) h += esc(withPc.length === l.products.length ? 'You count full cases and loose ' + unitWord(small, 2) + ' separately; the app adds them up.' : 'Products with a per-case number are counted as full cases plus loose ' + unitWord(small, 2) + '.');
   else h += esc('Fill in how many ' + unitWord(small, 2) + ' come in a case to count full cases and loose ' + unitWord(small, 2) + ' separately.');
   return h + '</p>';
@@ -755,10 +698,19 @@ export function onInput(el, ev) {
     return true;
   }
   if (el.dataset.oline) {
-    const n = parseInt(el.value, 10);
-    if (!Number.isNaN(n)) setOrderQty(el.dataset.oline, n);
-    // Emptied, or something unreadable left behind: the suggested amount comes back, and shows in the box.
-    else if (ev.type === 'change' || !el.value.trim()) clearOrderQty(el.dataset.oline, ev.type === 'change');
+    if (ro()) { toast(NO_FLAG); return true; }
+    const id = el.dataset.oline, n = parseInt(el.value, 10), done = ev.type === 'change';
+    const l = lines().find((x) => x.id === id), f = l ? flagOf(l) : null;
+    if (!f) return true;
+    // Each keystroke is saved, so remember what the box held before it was typed in: 12 typed and then
+    // deleted must not leave its first digit behind as the amount.
+    if (!typedIn || typedIn.id !== id) typedIn = { id, n: f.n };
+    const before = typedIn.n;
+    if (done) typedIn = null;
+    if (n >= 1) setFlagAmount(id, n);
+    else if (n === 0 && done) { unflag(id); return true; } // done typing with 0 in the box: off the list
+    else setFlagAmount(id, before); // emptied, or unreadable: the amount it had comes back
+    showOrderQty(id, done);
     return true;
   }
   if (el.dataset.ie || el.dataset.pe) {

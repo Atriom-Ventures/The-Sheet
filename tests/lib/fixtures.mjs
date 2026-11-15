@@ -20,7 +20,20 @@ function history() {
     if (status) h.order = Object.assign({ status }, status !== 'saved' ? { placedAt: iso(daysAgo, 14), placedBy: 'BB' } : {}, status === 'received' ? { receivedAt: iso(daysAgo - 1, 9), receivedBy: 'AA' } : {});
     return h;
   };
-  return { schema: 1, updated: day(iso(1)), history: [e('h1', 9, 'AA', 'received'), e('h2', 4, 'BB', 'placed'), e('h3', 1, 'AA', 'saved')] };
+  // Those three are from before places and flags: no place (they read as the first place), and the
+  // order rides on the count. Then a count of the second place, and an order placed from flags.
+  const k = iso(3), o = iso(2, 15);
+  const kitchen = { id: 'h4', date: day(k), savedAt: k, by: 'BB', place: 'kitchen', counts: { 'p-cups': 15, 'p-coffee': 1 }, units: { 'p-cups': 'sleeve', 'p-coffee': 'case' }, per: { 'p-cups': 20 }, orderCount: 0, text: 'Sample count', updated: day(k) };
+  const order = { id: 'o1', kind: 'order', date: day(o), savedAt: o, by: 'BB', lines: [{ line: 'ln-decaf', name: 'Coffee, decaf', n: 2, unit: 'case' }], orderCount: 1, text: 'Sample order\n• Coffee, decaf: 2 cases', order: { status: 'placed', placedAt: o, placedBy: 'BB' }, updated: day(o) };
+  return { schema: 1, updated: day(iso(1)), history: [e('h1', 9, 'AA', 'received'), e('h2', 4, 'BB', 'placed'), kitchen, order, e('h3', 1, 'AA', 'saved')] };
+}
+/* The sample inventory with one line flagged to order and a few lines given a how-often group. */
+function inventory() {
+  const inv = fixture('inventory.json'), line = (id) => inv.lines.find((l) => l.id === id);
+  line('ln-tea').flag = { n: 2, unit: 'box', at: iso(0, 8), by: 'AA' };
+  line('ln-decaf').cleared = iso(2, 15);
+  line('ln-coffee').freq = 'few'; line('ln-cups').freq = 'week'; line('ln-soap').freq = 'month';
+  return inv;
 }
 
 /* The full app: book, inventory, follow-ups, saved counts, a count in progress, one clash, and the
@@ -38,7 +51,7 @@ export function fullPhone({ clash = true } = {}) {
     shift: { key: today + '|AM', notes: [{ id: 'n1', t: '10:15', tag: '86', text: 'Out of oat milk' }], f: {}, sentAt: null },
     book: slot(fixture('book.json'), 'owner/book'),
     state: slot(state, 'owner/book'),
-    inv: slot(fixture('inventory.json'), 'team/inventory'),
+    inv: slot(inventory(), 'team/inventory'),
     counts: slot(history(), 'team/inventory'),
     plans: slot(fixture('floorplans.json'), 'team/training'),
     menu: slot(fixture('card3.json'), 'team/training'),

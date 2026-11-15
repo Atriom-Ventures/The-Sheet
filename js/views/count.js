@@ -3,7 +3,7 @@
 
 import { app } from '../app.js';
 import { S, I, C, save, edit, hasInv, signName, whoAmI } from '../state.js';
-import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, placeName, placeOf, freqName, roomNow, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, orderList, orderText, placeOrder, saveCount, stampLine } from '../stock.js';
+import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, placeName, placeOf, freqName, roomNow, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, orderList, placeOrder, saveCount, stampLine } from '../stock.js';
 import { autoSync, canWrite, perm, connOf } from '../sync.js';
 import { setAtPath, markGone } from '../merge.js';
 import { esc, fmtNum, parseQty, round2, fmtShort, dateOf, uid, slug, copyText, shareText, todayKey, $, cssEsc, debounce, ago, daysSince, clone } from '../util.js';
@@ -120,6 +120,20 @@ function countText() {
   const by = signName() || whoAmI();
   return [(I().title || 'Inventory') + ' count · ' + placeName(roomNow()) + ' · ' + new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
     (by ? 'Counted by ' + by + ' · ' : '') + counted + ' of ' + activeLines().length + ' items counted', ''].concat(out).join('\n');
+}
+
+/* The order as a message for team chat. */
+function orderText(list) {
+  const t = totals({ live: true }), by = signName() || whoAmI();
+  const out = [(I().title || 'Inventory') + ' order · ' + new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })];
+  if (by) out.push('From ' + by);
+  out.push('', 'ORDER');
+  if (!list.length) out.push('Nothing is flagged to order.');
+  for (const o of list) {
+    const p = prefProduct(o.l), pd = p ? [p.brand, p.code].filter(Boolean).join(' ') : '', have = t.lines[o.l.id] && t.lines[o.l.id].sum.v;
+    out.push('• ' + o.l.name + ': ' + fmtQty(o.n, o.unit) + (pd ? ' (' + pd + ')' : '') + (have != null ? ' · have ' + fmtHave(o.l, have) : ''));
+  }
+  return out.join('\n');
 }
 
 /* For the Now screen. */
@@ -589,7 +603,7 @@ export const acts = {
     if (ro()) { toast('View only: placing an order needs write access. Copy the order instead.'); return; }
     if (!orderList().length) { toast('Nothing is flagged to order.'); return; }
     if (!armed(el, 'Tap again: order placed')) return;
-    placeOrder();
+    placeOrder(orderText(orderList()));
     autoSync('save', 800);
     toast('Order filed. The list is clear.'); app.go('#count/history');
   },

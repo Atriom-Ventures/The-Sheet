@@ -329,7 +329,7 @@ console.log('\n10. Flags, how often, and Order placed');
   check(!F.st.C().history.some((h) => h.kind === 'order') && K.orderList().length === 2, 'one tap on Order placed files nothing (it takes two)');
   F.act('order-place', { armed: '1' });
   const rec = F.st.C().history.slice(-1)[0];
-  check(rec.kind === 'order' && rec.orderCount === 2 && rec.order.status === 'placed' && rec.order.placedBy === 'BB' && JSON.stringify(rec.lines.map((x) => [x.line, x.n, x.unit])) === JSON.stringify([['ln-soap', 1, 'each'], ['ln-cups', 2, 'case']]), 'Order placed files an order record: what was ordered, placed, and by whom');
+  check(rec.kind === 'order' && rec.orderCount === 2 && rec.order.status === 'placed' && rec.order.placedBy === 'BB' && JSON.stringify(rec.lines.map((x) => [x.line, x.n, x.unit])) === JSON.stringify([['ln-soap', 1, 'each'], ['ln-cups', 2, 'case']]) && /• Dish soap: 1 each/.test(rec.text) && /• Paper cups, 12 oz: 2 cases/.test(rec.text), 'Order placed files an order record: what was ordered, the message, placed, and by whom');
   check(!ln('ln-cups').flag && !ln('ln-soap').flag && K.orderList().length === 0 && ln('ln-cups').cleared >= fl.at, '…and clears the flags, noting when');
   const hist = F.count.render({ sub: 'history' }), ord = F.count.render({ sub: 'order' });
   check(/Order · 2 items/.test(hist) && /An order is on its way/.test(ord) && /Mark received/.test(ord), 'History shows the order; the Order tab says it’s on its way and offers Mark received');

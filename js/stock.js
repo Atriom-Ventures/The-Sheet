@@ -12,7 +12,7 @@
 // has it syncs. So a line keeps the time its flag was last cleared, and a flag only counts if it was
 // set after that. See flagLive and mergeFlags.
 
-import { S, I, C, edit, save, newCount, whoAmI, signName } from './state.js';
+import { S, I, C, edit, save, newCount, whoAmI } from './state.js';
 import { clone, same, round2, fmtNum, todayKey, uid } from './util.js';
 
 /* ---------- places and how often ---------- */
@@ -250,26 +250,14 @@ export function orderList() {
   for (const l of I().lines.slice().sort(byName)) { const f = flagOf(l); if (f) out.push({ l, n: f.n, unit: f.unit, by: f.by }); }
   return out;
 }
-/* The order as a message for team chat. */
-export function orderText(list) {
-  const t = totals({ live: true }), by = signName() || whoAmI();
-  const out = [(I().title || 'Inventory') + ' order · ' + new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })];
-  if (by) out.push('From ' + by);
-  out.push('', 'ORDER');
-  if (!list.length) out.push('Nothing is flagged to order.');
-  for (const o of list) {
-    const p = prefProduct(o.l), pd = p ? [p.brand, p.code].filter(Boolean).join(' ') : '', have = t.lines[o.l.id] && t.lines[o.l.id].sum.v;
-    out.push('• ' + o.l.name + ': ' + fmtQty(o.n, o.unit) + (pd ? ' (' + pd + ')' : '') + (have != null ? ' · have ' + fmtHave(o.l, have) : ''));
-  }
-  return out.join('\n');
-}
 /* Order placed: file the order next to the saved counts and clear the flags it used. Returns the
-   record, or null when nothing is flagged. The record starts as placed; received comes later. */
-export function placeOrder() {
+   record, or null when nothing is flagged. The record starts as placed; received comes later.
+   `text` is what History shows and copies (the message that was sent). */
+export function placeOrder(text) {
   const list = orderList();
   if (!list.length) return null;
   const now = new Date().toISOString(), who = whoAmI();
-  const rec = { id: uid('o'), kind: 'order', date: todayKey(), savedAt: now, by: who, lines: list.map((o) => ({ line: o.l.id, name: o.l.name, n: o.n, unit: o.unit })), orderCount: list.length, text: orderText(list), order: { status: 'placed', placedAt: now, placedBy: who }, updated: todayKey() };
+  const rec = { id: uid('o'), kind: 'order', date: todayKey(), savedAt: now, by: who, lines: list.map((o) => ({ line: o.l.id, name: o.l.name, n: o.n, unit: o.unit })), orderCount: list.length, text: text || '', order: { status: 'placed', placedAt: now, placedBy: who }, updated: todayKey() };
   edit('counts', (c) => { c.history = (c.history || []).concat([rec]); });
   const ids = new Set(list.map((o) => o.l.id));
   edit('inv', (inv) => { for (const l of inv.lines) if (ids.has(l.id) && isObj(l.flag)) clearFlag(l, now); });

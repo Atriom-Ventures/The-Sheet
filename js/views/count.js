@@ -3,11 +3,11 @@
 
 import { app } from '../app.js';
 import { S, I, C, save, edit, hasInv, signName, whoAmI } from '../state.js';
-import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, PLACES, placeName, placeOf, FREQS, freqOf, freqName, roomNow, setRoom, inProgress, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, orderList, placeOrder, saveCount, stampLine } from '../stock.js';
+import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, PLACES, placeName, placeOf, FREQS, freqOf, freqName, roomNow, setRoom, inProgress, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, orderList, placeOrder, saveCount, stampLine, setFreq } from '../stock.js';
 import { autoSync, canWrite, perm, connOf } from '../sync.js';
 import { setAtPath, markGone } from '../merge.js';
 import { esc, fmtNum, parseQty, round2, fmtShort, dateOf, uid, slug, copyText, shareText, todayKey, $, cssEsc, debounce, ago, daysSince, clone } from '../util.js';
-import { ICON, seg, chip, empty, toast, armed, opts, field, openSheet, closeSheet, setSheetBody, isSheetOpen } from '../ui.js';
+import { ICON, seg, chip, empty, toast, armed, opts, field, openSheet, closeSheet, setSheetBody, setSheetTitle, isSheetOpen, announce } from '../ui.js';
 
 const STATES = [['active', 'On the order sheet'], ['disc', 'Crossed off the sheet'], ['ask', 'Not on the sheet: ask first'], ['useup', 'Not on the sheet: use up'], ['remove', 'Not on the sheet: remove']];
 const STATE_SHORT = { disc: 'Crossed off', ask: 'Ask first', useup: 'Use up', remove: 'Remove' };
@@ -17,7 +17,7 @@ const stateTag = (s) => '<span class="tag t-' + (STATE_SHORT[s] ? s : 'other') +
 const STATUS_LABEL = { todo: 'Not counted', partial: 'Partly', ok: 'Counted' };
 const SUBS = [['count', 'Count'], ['order', 'Order'], ['history', 'History'], ['items', 'Items']];
 
-let filter = 'all', q = '', openItem = null, confirmNew = false;
+let filter = 'all', q = '', confirmNew = false;
 let typedIn = null; // { id, n }: the order box being typed in, and the amount it had before
 
 const lines = () => I().lines;
@@ -472,6 +472,7 @@ function refreshTally() {
   const prog = document.getElementById('prog'); if (prog) prog.outerHTML = progressHTML();
   const cs = document.getElementById('csave-n'); if (cs) { const p = progress(); cs.textContent = p.counted + ' of ' + p.total; }
   const ob = $('[data-act="go-csub"][data-id="order"]'); if (ob) ob.textContent = orderLabel();
+  const it = document.getElementById('istats-n'); if (it) it.textContent = orderList().length;
 }
 const orderLabel = () => { const n = orderList().length; return 'Order' + (n ? ' (' + n + ')' : ''); };
 /* After a line goes on or off the order list, or its amount changes: its button, its stepper, the tallies.
@@ -484,6 +485,7 @@ function refreshFlag(lineId, focusBtn) {
   const q2 = document.getElementById('LQ-' + lineId); if (q2) q2.innerHTML = f ? orderStepper(l, f) : '';
   const card = document.getElementById('L-' + lineId); if (card) card.classList.toggle('flagged', !!f);
   if (focusBtn && btn) try { btn.focus(); } catch (e) { /* ignore */ }
+  refreshRow(lineId);
   refreshTally();
 }
 
@@ -513,6 +515,7 @@ function showOrderQty(lineId, force) {
   const inp = document.getElementById('oq-' + lineId); if (inp && f && (force || document.activeElement !== inp)) inp.value = fmtNum(f.n);
   const u = document.getElementById('OU-' + lineId); if (u && f) u.textContent = unitWord(f.unit, f.n);
   const t = $('#order-text'); if (t) t.textContent = orderText(orderList());
+  refreshRow(lineId);
 }
 const NO_FLAG = 'View only: changing the order list needs write access.';
 /* Off the list. On Count the line stays, so only its order row changes and focus goes back to its
@@ -543,21 +546,145 @@ function historyTab() {
   }).join('');
 }
 
-/* ---------- items (edit lines and products) ---------- */
+/* ---------- items: the quick-edit ledger ----------
+   One dense list: an Order tick, the line, its size and how often it's ordered. Tapping how often
+   steps to the next group (setFreq). Tapping the size opens "How it's counted", the same sheet the
+   unit on Count opens: stepping through units one tap at a time would pass through units a count
+   can't be converted to, and clear it. Tapping a name opens the line's panel: on hand, case size, the
+   order amount, and every other field behind More. Rows stay where they are while they're tapped, so
+   a how-often can be stepped past a group; they regroup the next time the list is drawn. */
+const SORTS = [['often', 'How often'], ['az', 'A to Z'], ['order', 'To order']];
+const FREQ_SHORT = { few: 'Few days', week: 'Weekly', month: 'Monthly', none: 'Not regular' };
+let isort = 'often', panelLine = null;
+const activeOf = (ls) => ls.filter((l) => l.state === 'active');
+const pickCount = () => lines().filter((l) => l.state === 'active' && l.products.length > 1 && !prefProduct(l)).length;
+/* What the Size cell says: the unit counted in, and the case size. */
+function sizeBits(l) {
+  const pcs = l.products.map(perCaseOf), n = pcs[0], small = smallUnit(l);
+  const bot = !pcs.some(Boolean) ? 'no case size' : !pcs.every((x) => x === n) ? 'sizes vary' : l.unit === 'case' ? fmtNum(n) + ' ' + unitWord(small, n) : fmtNum(n) + ' per case';
+  return { top: unitWord(l.unit, 1), bot };
+}
+/* The line under a name: what's on hand in all, what's on the order, products to pick. */
+function subLine(l, row) {
+  const bits = [], f = flagOf(l);
+  if (row && row.sum.v != null) bits.push('have ' + fmtHave(l, row.sum.v));
+  else bits.push(row && PLACES.some(([id]) => row[id].stale) ? 'count again' : 'not counted');
+  if (f) bits.push('order ' + fmtQty(f.n, f.unit));
+  if (l.products.length > 1) bits.push(l.products.length + ' products' + (l.state === 'active' && !prefProduct(l) ? ', pick one to order' : ''));
+  return esc(bits.join(' · '));
+}
+function freqInner(l) { const f = freqOf(l); return '<span>' + esc(FREQ_SHORT[f]) + '</span><span class="sr">' + esc(': how often ' + l.name + ' is ordered. Tap for the next.') + '</span>'; }
+const freqClass = (l) => 'lg-freq' + (freqOf(l) === 'none' ? '' : ' reg');
+function ledgerRow(l, t) {
+  const id = esc(l.id), on = l.state === 'active', f = on ? flagOf(l) : null, z = sizeBits(l), row = t.lines[l.id];
+  const box = '<span class="box">' + ICON.check + '</span>';
+  const tick = !on ? '<span class="lg-tick" aria-hidden="true"></span>'
+    : ro() ? '<span class="lg-tick" aria-hidden="true">' + (f ? '<span class="box on">' + ICON.check + '</span>' : '') + '</span>'
+    : '<button class="lg-tick" id="IT-' + id + '" data-act="inv-flag" data-line="' + id + '" aria-pressed="' + (f ? 'true' : 'false') + '" aria-label="' + esc('Order ' + l.name) + '">' + box + '</button>';
+  const name = '<button class="lg-name" id="IN-' + id + '" data-act="item-open" data-id="' + id + '" aria-haspopup="dialog"><span class="iname">' + esc(l.name) + '</span><span class="imeta">' + (on ? '' : stateTag(l.state) + ' ') + subLine(l, row) + '</span></button>';
+  const sz = '<span class="sz-u">' + esc(z.top) + '</span><span class="sz-c">' + esc(z.bot) + '</span>';
+  const size = ro() ? '<span class="lg-size ro">' + sz + '</span>'
+    : '<button class="lg-size" id="IZ-' + id + '" data-act="inv-how" data-line="' + id + '">' + sz + '<span class="sr">' + esc(': how ' + l.name + ' is counted. Tap to change.') + '</span></button>';
+  const freq = !on ? '<span class="lg-none" aria-hidden="true"></span>'
+    : ro() ? '<span class="' + freqClass(l) + ' ro">' + esc(FREQ_SHORT[freqOf(l)]) + '</span>'
+    : '<button class="' + freqClass(l) + '" id="IF-' + id + '" data-act="item-freq" data-line="' + id + '">' + freqInner(l) + '</button>';
+  return '<li class="lrow' + (f ? ' flagged' : '') + (on ? '' : ' off') + '" id="I-' + id + '">' + tick + name + size + freq + '</li>';
+}
+/* The groups for the sort on screen, then the lines off the order sheet, as on Count. */
+function ledgerGroups(t) {
+  const act = sortLines(activeOf(lines())), rows = (ls) => '<ul class="lg-l">' + ls.map((l) => ledgerRow(l, t)).join('') + '</ul>';
+  const group = (key, title, ls) => (ls.length ? '<section class="lg-g" aria-labelledby="LG-' + key + '"><h2 class="fg-h" id="LG-' + key + '">' + esc(title) + ' <span class="fg-n">' + ls.length + (ls.length === 1 ? ' line' : ' lines') + '</span></h2>' + rows(ls) + '</section>' : '');
+  let h = '';
+  if (isort === 'az') h += group('all', 'On the order sheet', act);
+  else if (isort === 'order') h += group('flag', 'On the order list', act.filter((l) => flagOf(l))) + group('noflag', 'Not on the list', act.filter((l) => !flagOf(l)));
+  else for (const [fid, fname] of FREQS) h += group(fid, fname, act.filter((l) => freqOf(l) === fid));
+  // A status the app doesn't know (a hand edit) goes with the lines off the sheet, so it can still be changed.
+  const extra = sortLines(lines().filter((l) => l.state !== 'active' && l.state !== 'disc'));
+  if (extra.length) h += '<details class="more"><summary class="band">Not on the order sheet <span class="n">' + extra.length + '</span></summary>' + rows(extra) + '</details>';
+  const off = sortLines(lines().filter((l) => l.state === 'disc'));
+  if (off.length) h += '<details class="more"><summary class="band">Crossed off the sheet <span class="n">' + off.length + '</span></summary>' + rows(off) + '</details>';
+  return h || empty('No lines yet. Add one to a section below.');
+}
+/* Sections: add, rename, delete when empty, and add a line to one. */
+function sectionsHTML() {
+  const rows = sections().map((c) => {
+    const n = lines().filter((l) => inSection(l, c)).length;
+    const acts = ro() || c.missing ? '' : '<span class="isect-a"><button class="btn small ghost" data-act="item-add" data-cat="' + esc(c.id) + '" aria-label="' + esc('Add a line to ' + c.name) + '">' + ICON.plus + ' Add a line</button>' +
+      '<button class="icon-b" data-act="cat-rename" data-id="' + esc(c.id) + '" aria-label="' + esc('Rename ' + c.name) + '">' + ICON.pencil + '</button>' +
+      (n ? '' : '<button class="icon-b" data-act="cat-del" data-id="' + esc(c.id) + '" aria-label="' + esc('Delete the empty section ' + c.name) + '">' + ICON.trash + '</button>') + '</span>';
+    return '<li class="isect"><span class="isect-t"><span class="isect-n">' + esc(c.name) + '</span><span class="isect-c">' + (n ? n + (n === 1 ? ' line' : ' lines') : 'empty') + '</span></span>' + acts + '</li>';
+  }).join('');
+  return '<section class="isects" aria-labelledby="isects-h"><h2 class="sub-title" id="isects-h">Sections</h2><ul class="isect-l">' + rows + '</ul>' +
+    (ro() ? '' : '<div class="row-actions"><button class="btn small" data-act="cat-new">' + ICON.plus + ' New section</button></div><p class="hint">To move a line to another section, tap its name and change it under More.</p>') + '</section>';
+}
 function itemsTab() {
-  const ls = lines();
-  const nopar = ls.filter((l) => l.state === 'active' && l.par == null).length, pick = ls.filter((l) => l.state === 'active' && l.products.length > 1 && !l.products.some((p) => p.pref)).length;
-  let h = '<div class="istats"><span><b>' + ls.filter((l) => l.state === 'active').length + '</b> active lines</span><span><b>' + nopar + '</b> without a minimum</span><span><b>' + pick + '</b> need one product picked</span></div>';
-  sections().forEach((c) => {
-    const cl = sortLines(ls.filter((l) => inSection(l, c)));
-    if (!cl.length && c.missing) return;
-    const acts = ro() || c.missing ? '' : '<span class="band-acts"><button class="icon-b" data-act="cat-rename" data-id="' + esc(c.id) + '" aria-label="' + esc('Rename ' + c.name) + '">' + ICON.pencil + '</button>' +
-      (cl.length ? '' : '<button class="icon-b" data-act="cat-del" data-id="' + esc(c.id) + '" aria-label="' + esc('Delete the empty section ' + c.name) + '">' + ICON.trash + '</button>') + '</span>';
-    h += '<section class="inv-cat"><div class="band-row"><h2 class="band">' + esc(c.name) + '</h2>' + acts + '</div><div class="sheet-l">' + (cl.length ? cl.map((l) => itemRow(l)).join('') : '<p class="hint pad">Nothing in this section yet.</p>') +
-      (ro() || c.missing ? '' : '<button class="add-line" data-act="item-add" data-cat="' + esc(c.id) + '">' + ICON.plus + ' Add a line to ' + esc(c.name) + '</button>') + '</div></section>';
-  });
-  if (!ro()) h += '<div class="row-actions"><button class="btn small" data-act="cat-new">' + ICON.plus + ' New section</button></div><p class="hint">Sections and lines always show A to Z. To move a line, open it and change its section.</p>';
-  return h;
+  const ls = lines(), t = totals({ live: true });
+  let h = '<div class="istats"><span><b>' + activeOf(ls).length + '</b> on the order sheet</span><span><b id="istats-n">' + orderList().length + '</b> ticked to order</span><span><b>' + pickCount() + '</b> need one product picked</span></div>';
+  h += '<div class="seg-c isort" role="group" aria-label="Sort">' + SORTS.map(([id, label]) => '<button data-act="item-sort" data-id="' + id + '" aria-pressed="' + (id === isort ? 'true' : 'false') + '">' + esc(label) + '</button>').join('') + '</div>';
+  h += '<p class="hint lg-hint">' + (ro() ? 'View only. Tap a name to see what’s on hand and what’s on the order.' : 'Tick to order. Tap a size or how often to change it; rows regroup when the sort changes. Tap a name for the rest.') + '</p>';
+  h += '<div class="lg-cols" aria-hidden="true"><span>Order</span><span>Item</span><span>Size</span><span>How often</span></div>';
+  return h + '<div class="ledger" id="ledger">' + ledgerGroups(t) + '</div>' + sectionsHTML();
+}
+/* Redraw a row in place (focus stays on whatever had it), and the panel when it's that line's. */
+function keepFocus(fn) {
+  const a = document.activeElement, id = a && a.id;
+  fn();
+  if (id && document.activeElement !== a) { const n = document.getElementById(id); if (n) try { n.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+}
+function refreshRow(id) {
+  const el = document.getElementById('I-' + id); if (!el) return;
+  const l = lines().find((x) => x.id === id);
+  keepFocus(() => { if (l) el.outerHTML = ledgerRow(l, totals({ live: true })); else el.remove(); });
+}
+function redrawPanel() {
+  if (!panelLine || !isSheetOpen()) return;
+  const m = $('#ip-more');
+  keepFocus(() => setSheetBody(itemPanel(panelLine, !!(m && m.open))));
+}
+
+/* ---------- a line's panel ---------- */
+/* What's on hand in each room and in all, from saved counts and this phone's counts in progress. */
+function panelHave(l, t) {
+  const row = t.lines[l.id]; if (!row) return '';
+  return '<dl class="tot">' + PLACES.map(([id, name]) => {
+    const r = row[id], room = t.rooms[id];
+    return '<div><dt>' + esc(name) + '</dt><dd>' + esc(amtWords(l, r) + (r.live ? ' (counting now, not saved)' : r.v != null && room ? ', counted ' + fmtShort(room.date) : '')) + '</dd></div>';
+  }).join('') + '<div class="tsum"><dt>In all</dt><dd>' + esc(row.sum.v != null ? fmtHave(l, row.sum.v) : 'nothing counted yet') + '</dd></div></dl>';
+}
+/* One case holds N: a stepper on the product's per-case number. Typing works too (saveField). */
+function caseRow(l, p, named) {
+  const pid = esc(p.id), n = perCaseOf(p), small = unitWord(smallUnit(l), 2), who = p.name || l.name, label = (named ? who + ': ' : '') + 'one case holds';
+  if (ro()) return '<p class="ip-case">' + esc((named ? who + ': ' : '') + (n ? 'one case holds ' + fmtNum(n) + ' ' + small : 'no case size set')) + '</p>';
+  return '<div class="ip-case"><label class="ip-l" for="ip-pc-' + pid + '">' + esc(label.charAt(0).toUpperCase() + label.slice(1)) + '</label><div class="pctl"><div class="stepper">' +
+    '<button class="step" id="ip-pcm-' + pid + '" data-act="pc-step" data-pid="' + pid + '" data-d="-1" aria-label="' + esc('One less ' + unitWord(smallUnit(l), 1) + ' per case, ' + who) + '">−</button>' +
+    '<input class="qty" id="ip-pc-' + pid + '" data-pe="perCase" data-pid="' + pid + '" inputmode="numeric" enterkeyhint="done" autocomplete="off" placeholder="–" value="' + (n ? esc(fmtNum(n)) : '') + '">' +
+    '<button class="step" id="ip-pcp-' + pid + '" data-act="pc-step" data-pid="' + pid + '" data-d="1" aria-label="' + esc('One more ' + unitWord(smallUnit(l), 1) + ' per case, ' + who) + '">+</button></div><span class="unit">' + esc(small) + '</span></div></div>';
+}
+/* The whole panel. `more`: whether More starts open. Draws like a screen, so counts in progress are
+   brought up to date first, as render() does. */
+export function itemPanel(id, more) {
+  const l = lines().find((x) => x.id === id);
+  if (!l) return empty('That line isn’t there anymore.');
+  reconcileUnits();
+  const t = totals({ live: true }), on = l.state === 'active', f = on ? flagOf(l) : null;
+  let h = '<div class="ipanel"><section aria-labelledby="ip-have-h"><h3 class="ed-h" id="ip-have-h">On hand</h3>' + panelHave(l, t) + '</section>';
+  h += '<section aria-labelledby="ip-case-h"><h3 class="ed-h" id="ip-case-h">Case size</h3>' + l.products.map((p) => caseRow(l, p, l.products.length > 1)).join('') + '</section>';
+  h += '<section aria-labelledby="ip-ord-h"><h3 class="ed-h" id="ip-ord-h">Order this time</h3>';
+  if (!on) h += '<p class="hint">' + esc('Not on the order sheet, so it can’t go on an order.' + (ro() ? '' : ' Change its status under More.')) + '</p>';
+  else h += flagRow(l) + (ro() && !f ? '<p class="hint">Not on the order list.</p>' : '');
+  h += '</section>';
+  if (!ro()) h += '<details class="ip-more" id="ip-more"' + (more ? ' open' : '') + '><summary>More: name, section, status, unit, minimum, products</summary>' + itemEditor(l) + '</details>';
+  return h + '</div>';
+}
+function openPanel(id, more) {
+  const l = lines().find((x) => x.id === id); if (!l) return;
+  const c = I().cats.find((x) => x.id === l.cat);
+  panelLine = id;
+  openSheet({ eyebrow: c ? c.name : 'Item', title: l.name, body: itemPanel(id, more), foot: '<button class="btn primary" data-act="sheet-close">Done</button>',
+    onClose: () => {
+      saveItemField.flush(); panelLine = null; app.renderView();
+      const b = document.getElementById('IN-' + id) || document.getElementById('screen-h'); if (b) try { b.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+    } });
 }
 function catSheet(id) {
   const c = id ? I().cats.find((x) => x.id === id) : null;
@@ -602,12 +729,7 @@ export function changeUnit(id, to) {
   reconcileUnits(); // the other place's count in progress: converted or cleared the same way
   return msg;
 }
-function itemRow(l) {
-  const open = openItem === l.id;
-  const meta = [l.par != null ? 'min ' + fmtQty(l.par, l.unit) : 'no min', l.products.length > 1 ? l.products.length + ' products' : ''].filter(Boolean).join(' · ');
-  return '<div class="irow' + (open ? ' open' : '') + '" id="I-' + esc(l.id) + '"><button class="isum" data-act="item-open" data-id="' + esc(l.id) + '" aria-expanded="' + open + '"><span class="iname">' + esc(l.name) + '</span><span class="imeta">' + esc(meta) + '</span>' + (l.state !== 'active' ? stateTag(l.state) : '') + '</button>' + (open ? itemEditor(l) : '') + '</div>';
-}
-/* Unit, loose unit and step: in Items and in the "how it's counted" sheet. */
+/* Unit, loose unit and step: in an item's More and in the "how it's counted" sheet. */
 const STEPS = [[0.25, '¼'], [0.5, '½'], [1, '1']];
 function unitFields(l, pre) {
   const lid = esc(l.id), id = (k) => pre + '-' + k + '-' + lid;
@@ -619,25 +741,26 @@ function perCaseField(l, p, pre, named) {
   const pid = esc(p.id), label = (named ? (p.name || l.name) + ': ' : '') + unitWord(smallUnit(l), 2) + ' per case';
   return '<div class="field' + (named ? ' wide' : '') + '"><label for="' + pre + '-pc-' + pid + '">' + esc(label) + '</label><input id="' + pre + '-pc-' + pid + '" data-pe="perCase" data-pid="' + pid + '" inputmode="numeric" placeholder="not set" value="' + esc(p.perCase || '') + '"></div>';
 }
+/* Every field of a line and its products, behind More in the line's panel. The per-case number is
+   above it, under Case size. */
 function itemEditor(l) {
   const lid = esc(l.id);
   const lineOpts = lines().map((x) => [x.id, x.name]);
-  let h = '<div class="editor"><div class="grid2">' +
+  let h = '<div class="editor flat"><div class="grid2">' +
     '<div class="field wide"><label for="ie-name-' + lid + '">Line name</label><input id="ie-name-' + lid + '" data-ie="name" data-line="' + lid + '" value="' + esc(l.name) + '"></div>' +
     '<div class="field"><label for="ie-par-' + lid + '">Minimum</label><input id="ie-par-' + lid + '" data-ie="par" data-line="' + lid + '" inputmode="decimal" placeholder="none" value="' + (l.par == null ? '' : esc(fmtNum(l.par))) + '"></div>' +
     unitFields(l, 'ie') +
     '<div class="field"><label for="ie-cat-' + lid + '">Section</label><select id="ie-cat-' + lid + '" data-ie="cat" data-line="' + lid + '">' + opts(I().cats.slice().sort(byName).map((c) => [c.id, c.name]), l.cat) + '</select></div>' +
     '<div class="field wide"><label for="ie-state-' + lid + '">Status</label><select id="ie-state-' + lid + '" data-ie="state" data-line="' + lid + '">' + opts(STATES, l.state) + '</select></div>' +
     '<div class="field wide"><label for="ie-note-' + lid + '">Note</label><input id="ie-note-' + lid + '" data-ie="note" data-line="' + lid + '" value="' + esc(l.note || '') + '"></div></div>';
-  h += '<h3 class="ed-h">Products <small>' + (l.products.length > 1 ? 'They add up toward one minimum' : '') + '</small></h3>';
+  h += '<h3 class="ed-h">Products <small>' + (l.products.length > 1 ? 'They add up to one amount on hand' : '') + '</small></h3>';
   l.products.forEach((p) => {
     const pid = esc(p.id);
     h += '<div class="pedit"><div class="grid2">' +
       '<div class="field wide"><label for="pe-name-' + pid + '">Product</label><input id="pe-name-' + pid + '" data-pe="name" data-pid="' + pid + '" value="' + esc(p.name || '') + '" placeholder="' + esc(l.name) + '"></div>' +
       '<div class="field"><label for="pe-brand-' + pid + '">Brand</label><input id="pe-brand-' + pid + '" data-pe="brand" data-pid="' + pid + '" value="' + esc(p.brand || '') + '"></div>' +
       '<div class="field"><label for="pe-code-' + pid + '">Item #</label><input id="pe-code-' + pid + '" data-pe="code" data-pid="' + pid + '" value="' + esc(p.code || '') + '" class="mono"></div>' +
-      perCaseField(l, p, 'pe', false) +
-      '<div class="field"><label for="pe-mv-' + pid + '">Move to line</label><select id="pe-mv-' + pid + '" data-pmove="' + pid + '">' + opts(lineOpts, l.id) + '</select></div>' +
+      '<div class="field wide"><label for="pe-mv-' + pid + '">Move to line</label><select id="pe-mv-' + pid + '" data-pmove="' + pid + '">' + opts(lineOpts, l.id) + '</select></div>' +
       '<div class="field wide"><label for="pe-note-' + pid + '">Note</label><input id="pe-note-' + pid + '" data-pe="note" data-pid="' + pid + '" value="' + esc(p.note || '') + '"></div></div>' +
       '<div class="row-actions">' + (l.products.length > 1 ? '<label class="check"><input type="radio" name="pref-' + lid + '" data-pref="' + pid + '"' + (p.pref ? ' checked' : '') + '> Order this one</label>' : '') + '<button class="btn small danger" data-act="prod-del" data-pid="' + pid + '">' + ICON.trash + ' Remove product</button></div></div>';
   });
@@ -649,7 +772,7 @@ function itemEditor(l) {
 const stamp = stampLine;
 const editLine = (id, fn) => edit('inv', (inv) => { const l = inv.lines.find((x) => x.id === id); if (l) { fn(l, inv); stamp(l); } });
 const editProduct = (pid, fn) => edit('inv', (inv) => { for (const l of inv.lines) { const p = l.products.find((x) => x.id === pid); if (p) { fn(p, l, inv); stamp(l); return; } } });
-function redrawItem(id) { const el = document.getElementById('I-' + id); const l = lines().find((x) => x.id === id); if (el && l) el.outerHTML = itemRow(l); }
+function redrawItem(id) { refreshRow(id); if (panelLine === id) redrawPanel(); }
 
 export function render(route) {
   if (!hasInv()) return empty('No inventory loaded yet. It comes from the inventory repo once you connect. <button class="link inline" data-act="tab" data-id="more">Set up</button>');
@@ -760,16 +883,52 @@ export const acts = {
     dropClash(c.id); autoSync('save', 800); app.renderView();
     toast(done ? 'Switched to ' + (c.who || 'their') + (c.who ? '’s' : '') + ' version.' : 'That item isn’t there anymore.');
   },
-  'item-open': (el) => { if (ro()) { toast('View only: item changes need write access.'); return; } const prev = openItem; openItem = openItem === el.dataset.id ? null : el.dataset.id; if (prev) redrawItem(prev); redrawItem(el.dataset.id); },
-  'item-add': (el) => { if (ro()) return; const id = uid('ln'); edit('inv', (inv) => { const l = { id, cat: el.dataset.cat, name: 'New item', unit: 'case', step: 1, par: null, state: 'active', note: '', products: [{ id: uid('p'), name: '', brand: '', code: '' }] }; stamp(l); inv.lines.push(l); }); openItem = id; app.renderView(); setTimeout(() => { const n = document.getElementById('ie-name-' + id); if (n) { n.focus(); n.select(); } }, 60); },
-  'item-del': (el) => { if (!armed(el, 'Delete this line?')) return; const id = el.dataset.id; const l = lines().find((x) => x.id === id); edit('inv', (inv) => { inv.lines = inv.lines.filter((x) => x.id !== id); }); if (l) l.products.forEach((p) => forgetProduct(p.id)); openItem = null; app.renderView(); toast('Line deleted.'); },
-  'prod-add': (el) => { editLine(el.dataset.line, (l) => { l.products.push({ id: uid('p'), name: '', brand: '', code: '' }); }); redrawItem(el.dataset.line); },
-  'prod-del': (el) => { if (!armed(el, 'Remove?')) return; const l = findLineOfProduct(el.dataset.pid); if (!l) return; if (l.products.length < 2) { toast('A line needs at least one product. Delete the line instead.'); return; } editLine(l.id, (x) => { x.products = x.products.filter((p) => p.id !== el.dataset.pid); }); forgetProduct(el.dataset.pid); redrawItem(l.id); }
+  // Items: a line's panel (read only on a view-only phone), how often, the sort, and the case size.
+  'item-open': (el) => openPanel(el.dataset.id),
+  'item-freq': (el) => {
+    if (ro()) { toast('View only: changing how often needs write access.'); return; }
+    const id = el.dataset.line, l = lines().find((x) => x.id === id); if (!l || l.state !== 'active') return;
+    const i = FREQS.findIndex((f) => f[0] === freqOf(l)), next = FREQS[(i + 1) % FREQS.length][0];
+    if (!setFreq(id, next)) return;
+    // The button is updated, not redrawn, so focus stays on it for the next tap.
+    el.className = freqClass(l); el.innerHTML = freqInner(l);
+    announce(freqName(next));
+  },
+  'item-sort': (el) => {
+    if (!SORTS.some((x) => x[0] === el.dataset.id)) return;
+    isort = el.dataset.id;
+    const g = $('#ledger'); if (g) g.innerHTML = ledgerGroups(totals({ live: true }));
+    document.querySelectorAll('[data-act="item-sort"]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.id === isort ? 'true' : 'false'));
+  },
+  'pc-step': (el) => {
+    if (ro()) return;
+    const pid = el.dataset.pid, p = productOf(pid), l = findLineOfProduct(pid); if (!p || !l) return;
+    saveItemField.flush();
+    const was = perCaseOf(p), n = Math.max(0, was + (+el.dataset.d < 0 ? -1 : 1));
+    if (n === was) return;
+    editProduct(pid, (x) => { if (n) x.perCase = n; else delete x.perCase; });
+    afterUnitEdit(l.id);
+  },
+  'item-add': (el) => {
+    if (ro()) return;
+    const id = uid('ln');
+    edit('inv', (inv) => { const l = { id, cat: el.dataset.cat, name: 'New item', unit: 'case', step: 1, par: null, state: 'active', note: '', products: [{ id: uid('p'), name: '', brand: '', code: '' }] }; stamp(l); inv.lines.push(l); });
+    app.renderView(); openPanel(id, true);
+    setTimeout(() => { const n = document.getElementById('ie-name-' + id); if (n) { n.focus(); n.select(); } }, 60);
+  },
+  'item-del': (el) => {
+    if (ro() || !armed(el, 'Delete this line?')) return;
+    const id = el.dataset.id; const l = lines().find((x) => x.id === id);
+    edit('inv', (inv) => { inv.lines = inv.lines.filter((x) => x.id !== id); }); if (l) l.products.forEach((p) => forgetProduct(p.id));
+    if (panelLine === id && isSheetOpen()) closeSheet(); else app.renderView();
+    toast('Line deleted.');
+  },
+  'prod-add': (el) => { if (ro()) return; editLine(el.dataset.line, (l) => { l.products.push({ id: uid('p'), name: '', brand: '', code: '' }); }); redrawItem(el.dataset.line); },
+  'prod-del': (el) => { if (ro() || !armed(el, 'Remove?')) return; const l = findLineOfProduct(el.dataset.pid); if (!l) return; if (l.products.length < 2) { toast('A line needs at least one product. Delete the line instead.'); return; } editLine(l.id, (x) => { x.products = x.products.filter((p) => p.id !== el.dataset.pid); }); forgetProduct(el.dataset.pid); redrawItem(l.id); }
 };
 
 // The number keypad has digits and a decimal point only, so the hint sticks to those.
 const NUM_HELP = 'That isn’t a number this can read. Type a number like 2 or 2.5.';
-const imetaText = (l) => [l.par != null ? 'min ' + fmtQty(l.par, l.unit) : 'no min', l.products.length > 1 ? l.products.length + ' products' : ''].filter(Boolean).join(' · ');
 function saveField(el) {
   if (el.dataset.ie) {
     const k = el.dataset.ie, id = el.dataset.line;
@@ -780,9 +939,9 @@ function saveField(el) {
     if (k === 'inner' && UNITS.indexOf(v) < 0) return;
     if (k === 'name' && !v.trim()) return;
     editLine(id, (l) => { l[k] = v; });
-    if (k === 'cat' || k === 'state') { app.renderView(); }
+    if (k === 'cat' || k === 'state') { app.renderView(); redrawPanel(); }
     else if (k === 'inner' || k === 'step') afterUnitEdit(id);
-    else { const s = document.querySelector('#I-' + cssEsc(id) + ' .imeta'); const l = lines().find((x) => x.id === id); if (s && l) s.textContent = imetaText(l); const nm = document.querySelector('#I-' + cssEsc(id) + ' .iname'); if (nm && k === 'name') nm.textContent = v; }
+    else { refreshRow(id); if (k === 'name' && panelLine === id) setSheetTitle(v); }
   } else if (el.dataset.pe) {
     const k = el.dataset.pe; let v = el.value.trim();
     if (k === 'perCase') { v = v === '' ? undefined : Math.max(0, parseInt(v, 10) || 0) || undefined; }
@@ -793,10 +952,12 @@ function saveField(el) {
 const saveItemField = debounce(saveField, 350);
 let lastField = null;
 
-/* Redraw what shows how a line is counted: its sheet if open, and its Items row (a typed field keeps focus). */
+/* Redraw what shows how a line is counted: its sheet or its panel if open, and its Items row. A field
+   being typed in isn't redrawn, so it keeps focus. */
 function afterUnitEdit(id, typing) {
   if (howLine === id && isSheetOpen()) { if (!typing) setSheetBody(howBody(id)); else { const h = $('#how-sum'); const l = lines().find((x) => x.id === id); if (h && l) h.innerHTML = howSummary(l); } }
-  else if (!typing) redrawItem(id);
+  else if (panelLine === id && isSheetOpen() && !typing) redrawPanel();
+  refreshRow(id);
 }
 
 /* ---------- how a line is counted (the sheet behind the unit on the Count tab) ---------- */
@@ -819,7 +980,10 @@ function howBody(id) {
 function openHow(id) {
   const l = lines().find((x) => x.id === id); if (!l) return;
   howLine = id;
-  openSheet({ eyebrow: 'How it’s counted', title: l.name, body: howBody(id), foot: '<button class="btn primary" data-act="sheet-close">Done</button>', onClose: () => { saveItemField.flush(); howLine = null; app.renderView(); } });
+  // The screen is drawn again on close, so focus goes back to the same button by its id, if it has one.
+  const from = document.activeElement && document.activeElement.id;
+  openSheet({ eyebrow: 'How it’s counted', title: l.name, body: howBody(id), foot: '<button class="btn primary" data-act="sheet-close">Done</button>',
+    onClose: () => { saveItemField.flush(); howLine = null; app.renderView(); const b = from && document.getElementById(from); if (b) try { b.focus({ preventScroll: true }); } catch (e) { /* ignore */ } } });
 }
 
 /* Finish an item edit that's still waiting to be saved (the app is going to the background). */
@@ -877,7 +1041,7 @@ export function onInput(el, ev) {
     if (ev.type === 'change') refreshProduct(pid);
     return true;
   }
-  if (el.dataset.pref && ev.type === 'change') { const l = findLineOfProduct(el.dataset.pref); if (l) { editLine(l.id, (x) => { x.products.forEach((p) => { if (p.id === el.dataset.pref) p.pref = true; else delete p.pref; }); }); toast('Marked to order.'); } return true; }
+  if (el.dataset.pref && ev.type === 'change') { const l = findLineOfProduct(el.dataset.pref); if (l) { editLine(l.id, (x) => { x.products.forEach((p) => { if (p.id === el.dataset.pref) p.pref = true; else delete p.pref; }); }); redrawItem(l.id); toast('Marked to order.'); } return true; }
   if (el.dataset.pmove && ev.type === 'change') {
     const pid = el.dataset.pmove, to = el.value, from = findLineOfProduct(pid);
     if (!from || from.id === to) return true;

@@ -59,11 +59,15 @@ location.hash = '#book/allergens'; app.ui.editing = true; app.renderView(); save
   const pg = await import(path.join(dir, 'js/card3pages.js'));
   save('sheet-allergen-pages', pg.allPages(S.menu.local));
 }
-// Open an item editor on the Items tab
-const firstLine = S.inv.local && S.inv.local.lines[0];
-location.hash = '#count/items'; if (firstLine) { try { app.acts['item-open']({ dataset: { id: firstLine.id } }); } catch (e) {} app.renderView(); save('count-items-open', mk('view').innerHTML); }
 // Sheets
 const act = (a, data = {}) => { try { mk('sheet-root').innerHTML = ''; app.acts[a]({ dataset: data, disabled: false, innerHTML: '', classList: { add() {}, remove() {} } }); } catch (e) { console.error(a, e.message); } return mk('sheet-root').innerHTML; };
+// Items: the other two sorts, and a line's panel (one in sleeves with a case size, one with two products, one off the sheet).
+location.hash = '#count/items';
+for (const s of ['az', 'order']) { app.acts['item-sort']({ dataset: { id: s } }); app.renderView(); save('count-items-' + s, mk('view').innerHTML); }
+app.acts['item-sort']({ dataset: { id: 'often' } });
+save('sheet-item-panel', act('item-open', { id: 'ln-cups' }));
+save('sheet-item-panel-products', act('item-open', { id: 'ln-straws' }));
+save('sheet-item-panel-off', act('item-open', { id: 'ln-cocoa' }));
 const card = (B().cards || [])[0];
 if (card) save('sheet-card', act('open-card', { id: card.id }));
 if (card) save('sheet-card-edit', act('card-edit', { id: card.id }));

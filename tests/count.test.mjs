@@ -25,12 +25,13 @@ async function phone(name, mem) {
   const app = (await import(path.join(dir, 'js/app.js'))).app;
   const count = await import(path.join(dir, 'js/views/count.js'));
   const stock = await import(path.join(dir, 'js/stock.js'));
+  const ui = await import(path.join(dir, 'js/ui.js'));
   app.register(count);
   app.route = { tab: 'count', sub: '', id: '' };
   await st.load();
   const fake = (data, value) => ({ dataset: data, value, disabled: false, innerHTML: '', textContent: '', classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {} });
   return {
-    st, S: st.S, count, stock,
+    st, S: st.S, count, stock, ui,
     act: (a, data = {}) => app.acts[a](fake(data, '')),
     type: (data, value, type) => count.onInput(fake(data, value), { type })
   };
@@ -84,13 +85,13 @@ const counts = { schema: 1, updated: today, history: [{ id: 'h-odd', date: today
   { id: 'h-odd-k', date: today, savedAt: nowIso, by: 'B' + MARK, place: 'kitchen', counts: { 'p-coffee': '1' + MARK, 'p-tea': 2 }, units: { 'p-coffee': 'case' + MARK, 'p-tea': 'box' }, per: { 'p-tea': '6' + MARK }, orderCount: 0, text: 'x' + MARK, updated: today },
   { id: 'o-odd', kind: 'order', date: today, savedAt: nowIso, by: 'B' + MARK, lines: [{ line: 'ln-tea' + MARK, name: 'Tea' + MARK, n: '2' + MARK, unit: 'box' + MARK }], orderCount: '1' + MARK, text: 'x' + MARK, order: { status: 'placed', placedAt: nowIso, placedBy: 'B' + MARK }, updated: today }] };
 const slot = (doc) => ({ base: JSON.parse(JSON.stringify(doc)), local: JSON.parse(JSON.stringify(doc)), sha: 'x', src: 'id:1' });
-const Q = await phone('Odd', Object.assign(invPhone(), { inv: slot(inv), counts: slot(counts), count: { id: 'c', started: nowIso, counts: {}, orders: {} } }));
+const Q = await phone('Odd', Object.assign(invPhone(), { inv: slot(inv), counts: slot(counts), count: { id: 'c', started: nowIso, counts: { 'p-lids': 2 }, units: { 'p-lids': 'sleeve' + MARK }, orders: {} } })); // 2 lids counted, in a unit with markup in it
 check(Q.stock.orderList().length === 2, '(setup: two lines flagged, with markup in the amount, unit and name)');
 const screens = { Count: Q.count.render({ sub: 'count' }), Totals: Q.count.render({ sub: 'totals' }), Order: Q.count.render({ sub: 'order' }), History: Q.count.render({ sub: 'history' }) };
 Q.stock.setRoom('kitchen'); screens['Count, second room'] = Q.count.render({ sub: 'count' }); Q.stock.setRoom('servery');
 check(/Counted [^<]*by B&lt;u&gt;/.test(screens.Totals) && /id="oq-ln-coffee"/.test(screens.Count), '(setup: Totals shows who counted, and a flagged line’s stepper is on Count)');
-Q.act('item-open', { id: 'ln-cups' });
-screens['Items, with an item open'] = Q.count.render({ sub: 'items' });
+for (const so of ['often', 'az', 'order']) { Q.act('item-sort', { id: so }); screens['Items, sorted ' + so] = Q.count.render({ sub: 'items' }); }
+for (const l of inv.lines) screens['Item panel, ' + l.id] = Q.count.itemPanel(l.id, true);
 for (const [name, h] of Object.entries(screens)) {
   const raw = h.split(MARK).length - 1;
   check(!raw && !/Something went wrong/.test(h), name + ': shown as text' + (raw ? ' (' + raw + ' place' + (raw === 1 ? '' : 's') + ' put it in as markup)' : ''));
@@ -120,8 +121,8 @@ console.log('\n4. Sections and lines show A to Z');
   check(b[b.length - 1] === 'No section' && linesIn(h).includes('Stray item'), 'a line whose section is gone still shows, under "No section"');
   const paper = linesIn(h.slice(h.indexOf('>Paper goods<'), h.indexOf('>No section<')));
   check(paper.indexOf('8 oz bowls') < paper.indexOf('12 oz bowls') && paper.indexOf('12 oz bowls') < paper.indexOf('Cup lids'), 'lines A to Z, numbers in order (8 oz before 12 oz): ' + paper.join(', '));
-  const items = A.count.render({ sub: 'items' });
-  check(bands(items).join(',').startsWith('Cleaning,Coffee and tea,Paper goods'), 'Items uses the same order');
+  const items = A.count.render({ sub: 'items' }), secs = Array.from(items.matchAll(/class="isect-n">([^<]*)</g)).map((m) => m[1]);
+  check(secs.join(',') === 'Cleaning,Coffee and tea,Paper goods,No section', 'Items lists its sections in the same order: ' + secs.join(', '));
   A.act('inv-flag', { line: 'ln-z12' }); A.act('inv-flag', { line: 'ln-z8' }); // flagged in the other order
   const msgOrder = orderMsg(A);
   check(msgOrder.indexOf('• 8 oz bowls') > 0 && msgOrder.indexOf('• 8 oz bowls') < msgOrder.indexOf('• 12 oz bowls'), 'the order message lists lines in the same order');
@@ -417,6 +418,113 @@ console.log('\n11. The Count screen: room tabs, what each line shows, the Order 
   check(/Clear the Servery count in progress/.test(room()), 'Start the Servery count over asks first, naming the room');
   V.act('count-new-yes');
   check(!Object.keys(V.S.count.counts).length && ((K.inProgress('kitchen') || {}).counts || {})['p-lids'] === 1, '…and clears the Servery count only; the Kitchen count is kept');
+}
+
+console.log('\n12. Items: the quick-edit ledger');
+{
+  const L = await bare('Ledger', (inv) => { inv.lines.find((l) => l.id === 'ln-coffee').freq = 'few'; inv.lines.find((l) => l.id === 'ln-cups').freq = 'week'; });
+  const K = L.stock, ln = (id) => L.st.I().lines.find((l) => l.id === id), items = () => L.count.render({ sub: 'items' });
+  const rowOf = (h, id) => { const i = h.indexOf('id="I-' + id + '"'); return i < 0 ? '' : h.slice(i, h.indexOf('</li>', i)); };
+  const words = (h) => unesc(h.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const groupsOf = (h) => Array.from(h.matchAll(/<h2 class="fg-h" id="LG-(\w+)">([^<]*)<span class="fg-n">([^<]*)</g)).map((m) => m[2].trim());
+  const namesIn = (h) => Array.from(h.matchAll(/class="iname">([^<]*)</g)).map((m) => unesc(m[1]));
+  const groupHTML = (h, key) => { const i = h.indexOf('id="LG-' + key + '"'); if (i < 0) return ''; const j = h.indexOf('</section>', i); return h.slice(i, j); };
+  // A sheet needs a page; this gives openSheet just enough of one and returns what it drew.
+  globalThis.history = globalThis.history || { state: null, pushState() {}, back() {} };
+  const withSheet = (fn) => {
+    const realQ = document.querySelector, root = { innerHTML: '', querySelector: () => ({ focus() {} }) };
+    document.querySelector = (sel) => (sel === '#sheet-root' ? root : sel === '#app' ? { setAttribute() {}, removeAttribute() {} } : null);
+    try { fn(); return root.innerHTML; } finally { L.ui.closeSheet(true); document.querySelector = realQ; }
+  };
+  const actEl = (data) => ({ dataset: data, className: '', innerHTML: '', classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {}, getAttribute: () => null });
+
+  let h = items();
+  check(/class="lg-cols"[^>]*><span>Order<\/span><span>Item<\/span><span>Size<\/span><span>How often<\/span>/.test(h), 'one table: Order, Item, Size, How often');
+  check(!/min \d|no min|without a minimum|Minimum/.test(h), 'the list shows no minimums');
+
+  // Sorted by how often: the four groups in order, empty ones left out; lines off the sheet after.
+  check(JSON.stringify(groupsOf(h)) === JSON.stringify(['Every few days', 'Weekly', 'Not regular']), 'sorted by how often (the default): ' + groupsOf(h).join(', '));
+  check(namesIn(groupHTML(h, 'few')).join() === 'Coffee, regular' && namesIn(groupHTML(h, 'week')).join() === 'Paper cups, 12 oz' && !namesIn(groupHTML(h, 'none')).includes('Coffee, regular'), 'each line in its own group');
+  const offPart = h.slice(h.indexOf('Not on the order sheet <span'));
+  check(/Not on the order sheet <span class="n">2</.test(h) && /Crossed off the sheet <span class="n">1</.test(h) && namesIn(offPart).join() === 'Hot cocoa,Sanitizer wipes,Foam cups' && !namesIn(groupHTML(h, 'none')).includes('Hot cocoa'), 'lines off the order sheet come after, as on Count');
+  const act = L.st.I().lines.filter((l) => l.state === 'active').map((l) => l.name).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  L.act('item-sort', { id: 'az' }); h = items();
+  check(JSON.stringify(groupsOf(h)) === JSON.stringify(['On the order sheet']) && JSON.stringify(namesIn(groupHTML(h, 'all'))) === JSON.stringify(act), 'A to Z: every line on the sheet in one list, A to Z');
+  L.act('item-sort', { id: 'nonsense' });
+  check(/data-act="item-sort" data-id="az" aria-pressed="true"/.test(items()), 'a sort the app doesn’t know is ignored');
+
+  // The Order tick.
+  check(/<button class="lg-tick" id="IT-ln-cups" data-act="inv-flag" data-line="ln-cups" aria-pressed="false" aria-label="Order Paper cups, 12 oz">/.test(rowOf(h, 'ln-cups')), 'each line on the sheet has an Order tick');
+  check(!/data-act="inv-flag"/.test(rowOf(h, 'ln-cocoa')) && !/data-act="item-freq"/.test(rowOf(h, 'ln-cocoa')), 'a line off the order sheet has no tick and no how-often to step');
+  L.act('inv-flag', { line: 'ln-cups' }); h = items();
+  check(/aria-pressed="true"/.test(rowOf(h, 'ln-cups')) && /class="lrow flagged" id="I-ln-cups"/.test(h) && words(rowOf(h, 'ln-cups')).includes('order 1 case') && K.orderList().length === 1 && /id="istats-n">1</.test(h), 'ticking puts it on the shared order list; the row says “order 1 case”');
+  L.act('item-sort', { id: 'order' }); h = items();
+  check(JSON.stringify(groupsOf(h)) === JSON.stringify(['On the order list', 'Not on the list']) && namesIn(groupHTML(h, 'flag')).join() === 'Paper cups, 12 oz' && !namesIn(groupHTML(h, 'noflag')).includes('Paper cups, 12 oz'), 'To order: the ticked lines first, then the rest');
+  L.act('inv-flag', { line: 'ln-cups' });
+  check(!K.orderList().length && /aria-pressed="false"/.test(rowOf(items(), 'ln-cups')), 'ticking again takes it off');
+  L.act('item-sort', { id: 'often' });
+
+  // How often: a tap steps to the next group, through all four and round again.
+  const seen = [], b = actEl({ line: 'ln-soap' });
+  for (let i = 0; i < 4; i++) { L.count.acts['item-freq'](b); seen.push(ln('ln-soap').freq); }
+  check(seen.join() === 'few,week,month,none', 'tapping how often steps Not regular → Every few days → Weekly → Monthly → Not regular: ' + seen.join(', '));
+  check(ln('ln-soap').updated && ln('ln-soap').by === 'BB', 'saved on the line for everyone, with who changed it');
+  L.count.acts['item-freq'](b);
+  check(/Few days/.test(b.innerHTML) && /how often Dish soap is ordered/.test(b.innerHTML) && /\breg\b/.test(b.className), 'the button shows the new group in place (so focus stays on it for the next tap)');
+  L.count.acts['item-freq'](actEl({ line: 'ln-cocoa' }));
+  check(!ln('ln-cocoa').freq, 'a line off the order sheet isn’t given a group');
+
+  // Size: the unit and the case size; tapping it opens how it's counted.
+  const size = (id) => words((/class="lg-size"[^>]*>([\s\S]*?)<span class="sr">/.exec(rowOf(items(), id)) || [])[1] || '');
+  check(size('ln-cups') === 'sleeve 20 per case' && size('ln-napkins') === 'case no case size' && size('ln-boxes') === 'sleeve no case size', 'Size says the unit and the case size: ' + [size('ln-cups'), size('ln-napkins'), size('ln-boxes')].join(' | '));
+  L.st.edit('inv', (inv) => { inv.lines.find((l) => l.id === 'ln-napkins').products[0].perCase = 12; inv.lines.find((l) => l.id === 'ln-boxes').products[0].perCase = 50; });
+  check(size('ln-napkins') === 'case 12 sleeves' && size('ln-boxes') === 'sleeve sizes vary', 'a line counted in cases says how many loose ones a case holds; products that differ say so: ' + size('ln-napkins') + ' | ' + size('ln-boxes'));
+  check(/<button class="lg-size" id="IZ-ln-cups" data-act="inv-how" data-line="ln-cups">/.test(items()), 'tapping Size opens “How it’s counted”, the same sheet as on Count');
+
+  // A line's panel: on hand, case size, the order amount, and every other field behind More.
+  tap(L, 'p-cups', 'c', 2); tap(L, 'p-cups', 'l', 3); // 2 cases + 3 sleeves, at 20 a case, counted in the first room
+  let pn = L.count.itemPanel('ln-cups');
+  check(words(pn).includes('Servery 2 cases + 3 sleeves (counting now, not saved)') && words(pn).includes('Kitchen not counted') && words(pn).includes('In all 2 cases + 3 sleeves'), 'the panel says what’s on hand in each room and in all: ' + words(pn).slice(0, 140));
+  check(/id="ip-pc-p-cups" data-pe="perCase" data-pid="p-cups"[^>]*value="20"/.test(pn) && /data-act="inv-flag" data-line="ln-cups"/.test(pn) && !/id="oq-ln-cups"/.test(pn), 'the case size is there to change, and an Order button (no amount until it’s on the list)');
+  L.act('inv-flag', { line: 'ln-cups' }); L.act('ord-inc', { line: 'ln-cups' });
+  check(/id="oq-ln-cups" data-oline="ln-cups"[^>]*value="2"/.test(L.count.itemPanel('ln-cups')), 'on the list, the panel shows the amount with its stepper');
+  const keys = (re, html) => Array.from(new Set(Array.from(html.matchAll(re)).map((m) => m[1]))).sort().join(',');
+  pn = L.count.itemPanel('ln-straws', true);
+  check(keys(/data-ie="(\w+)"/g, pn) === 'cat,name,note,par,state,step,unit' && keys(/data-pe="(\w+)"/g, pn) === 'brand,code,name,note,perCase', 'every line field Items edited before is still in the panel (name, minimum, unit, step, section, status, note), and every product field (name, brand, item #, per case, note)');
+  check(/data-pmove="p-straw-a"/.test(pn) && /data-pref="p-straw-b"/.test(pn) && /data-act="prod-add"/.test(pn) && /data-act="prod-del"/.test(pn) && /data-act="item-del"/.test(pn), '…and move product, order this one, add and remove product, delete line');
+  check(/data-ie="inner"/.test(L.count.itemPanel('ln-napkins')), 'a line counted in cases has its loose unit there too');
+  check(pn.split('data-pe="perCase" data-pid="p-straw-a"').length === 2 && /<details class="ip-more" id="ip-more" open>/.test(pn) && !/<details class="ip-more" id="ip-more" open>/.test(L.count.itemPanel('ln-straws')), 'each per-case box shows once; More can start open or closed');
+
+  // The case-size stepper, and a count in progress made as full cases and loose ones.
+  L.act('pc-step', { pid: 'p-cups', d: '1' });
+  pn = L.count.itemPanel('ln-cups');
+  check(Number(ln('ln-cups').products[0].perCase) === 21 && L.S.count.counts['p-cups'] === 45 && words(pn).includes('Servery 2 cases + 3 sleeves'), 'plus one: 21 a case, and the 2 cases + 3 sleeves counted stay 2 cases + 3 (45 sleeves now): ' + L.S.count.counts['p-cups']);
+  L.act('pc-step', { pid: 'p-lids', d: '1' });
+  check(Number(ln('ln-lids').products[0].perCase) === 1, 'on a line with no case size, plus starts it at 1');
+  L.act('pc-step', { pid: 'p-lids', d: '-1' }); L.act('pc-step', { pid: 'p-lids', d: '-1' });
+  check(!('perCase' in ln('ln-lids').products[0]), 'minus from 1 takes the case size away');
+
+  // Opening the panel, and adding a line, through the sheet.
+  const sh = withSheet(() => L.act('item-open', { id: 'ln-cups' }));
+  check(/aria-labelledby="sheet-title"/.test(sh) && />Paper cups, 12 oz</.test(sh) && /Paper goods/.test(sh) && /id="ip-pc-p-cups"/.test(sh), 'tapping a name opens its panel, titled with the line and its section');
+  let added = null;
+  const sh2 = withSheet(() => { L.act('item-add', { cat: 'clean' }); added = L.st.I().lines.find((l) => l.name === 'New item'); });
+  check(added && added.cat === 'clean' && added.state === 'active' && new RegExp('id="ie-name-' + added.id + '"').test(sh2) && /id="ip-more" open/.test(sh2), 'Add a line makes one in that section and opens its panel with More open, to name it');
+
+  // Sections: add a line to one, rename it, delete it only when it's empty.
+  L.st.edit('inv', (inv) => { inv.cats.push({ id: 'empty-one', name: 'Frozen' }); });
+  h = items();
+  const sect = (name) => { const i = h.indexOf('class="isect-n">' + name + '<'); return h.slice(i, h.indexOf('</li>', i)); };
+  check(/data-act="item-add" data-cat="paper"/.test(sect('Paper goods')) && /data-act="cat-rename" data-id="paper"/.test(sect('Paper goods')) && !/cat-del/.test(sect('Paper goods')) && /data-act="cat-del" data-id="empty-one"/.test(sect('Frozen')) && /data-act="cat-new"/.test(h), 'each section can take a new line and be renamed; only an empty one can be deleted; a new section can be added');
+
+  // A view-only phone sees the ledger but can't change it.
+  const R = await bare('LedgerRO', (inv) => { inv.lines.find((l) => l.id === 'ln-tea').flag = { n: 2, unit: 'box', at: new Date().toISOString(), by: 'AA' }; });
+  R.S.settings.perm = { inv: { push: false } };
+  const rh = R.count.render({ sub: 'items' }), rp = R.count.itemPanel('ln-tea');
+  check(!/<button class="lg-tick"|data-act="item-freq"|data-act="inv-how"|data-act="cat-|data-act="item-add"/.test(rh) && /class="box on"/.test(rowOf(rh, 'ln-tea')) && /data-act="item-open"/.test(rh), 'view only: ticks, sizes and how often show but aren’t buttons; names still open');
+  check(!/<input|<select|ip-more|data-act="pc-step"|data-act="inv-flag"/.test(rp) && words(rp).includes('To order: 2 boxes') && words(rp).includes('In all'), 'view only: the panel shows on hand, case size and the order amount, with nothing to change');
+  R.count.acts['item-freq'](actEl({ line: 'ln-tea' }));
+  check(!R.st.I().lines.find((l) => l.id === 'ln-tea').freq, 'view only: how often can’t be stepped');
 }
 
 T.done();

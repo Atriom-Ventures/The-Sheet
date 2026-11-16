@@ -63,6 +63,16 @@ for (const h of ['#now', '#book', '#book/cards', '#book/sheet', '#book/day', '#c
   T.check(/<h1 class="sr" id="screen-h"/.test(v) && / · The Sheet$/.test(document.title), '   has a page heading and title (' + document.title + ')');
 }
 if (mode === 'inv') T.check(!/data-id="(now|book|lead)"/.test(mk('nav-in').innerHTML), 'count-only phone never shows Now, Book or Lead');
+if (mode !== 'none') {
+  // Items: a line's panel, and the size opening how it's counted.
+  const { app } = await import(path.join(dir, 'js/app.js'));
+  location.hash = '#count/items'; await new Promise((r) => setTimeout(r, 10));
+  const open = (a, data) => { mk('sheet-root').innerHTML = ''; app.acts[a]({ dataset: data, disabled: false, innerHTML: '', className: '', classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {} }); return mk('sheet-root').innerHTML; };
+  const pn = open('item-open', { id: 'ln-cups' });
+  T.check(/role="dialog"/.test(pn) && /On hand/.test(pn) && /Case size/.test(pn) && /Order this time/.test(pn) && /More:/.test(pn) && !/Something went wrong/.test(pn), 'Items: a line’s panel opens');
+  const how = open('inv-how', { line: 'ln-cups' });
+  T.check(/How it’s counted/.test(how) && /data-ie="unit"/.test(how), 'Items: tapping a size opens how it’s counted');
+}
 T.check(/Not connected|Synced|Changes|Sync problem|Connected|Syncing/.test(mk('top-in').innerHTML), 'status chip shows');
 console.error = origErr;
 T.check(!errors.length, 'no console errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));

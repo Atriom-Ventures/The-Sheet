@@ -26,12 +26,13 @@ async function phone(name, mem) {
   const count = await import(path.join(dir, 'js/views/count.js'));
   const stock = await import(path.join(dir, 'js/stock.js'));
   const ui = await import(path.join(dir, 'js/ui.js'));
+  const print = await import(path.join(dir, 'js/print.js'));
   app.register(count);
   app.route = { tab: 'count', sub: '', id: '' };
   await st.load();
   const fake = (data, value) => ({ dataset: data, value, disabled: false, innerHTML: '', textContent: '', classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {} });
   return {
-    st, S: st.S, count, stock, ui,
+    st, S: st.S, count, stock, ui, print,
     act: (a, data = {}) => app.acts[a](fake(data, '')),
     type: (data, value, type) => count.onInput(fake(data, value), { type })
   };
@@ -40,13 +41,15 @@ const unesc = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quo
 /* The order message as it would be copied to team chat, and one item's line in it. */
 const orderMsg = (P) => unesc((/<pre class="chit" id="order-text">([\s\S]*?)<\/pre>/.exec(P.count.render({ sub: 'order' })) || [])[1] || '');
 const lineOf = (P, name) => orderMsg(P).split('\n').find((l) => l.startsWith('• ' + name)) || '(not on the order)';
+/* A line's row on the Order tab, in words: its name, what's on hand, the product, who flagged it. */
+const orderRowOf = (P, id) => { const h = P.count.render({ sub: 'order' }), i = h.indexOf('id="O-' + id + '"'); return i < 0 ? '(no row)' : unesc(h.slice(i, h.indexOf('</li>', i)).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim(); };
 
 console.log('\n1. Orders are flagged by hand, and an amount keeps its unit');
 const P = await phone('Ord', invPhone()); // count in progress: cups 2, lids 0, napkins ½; tea is flagged
 check(lineOf(P, 'Cup lids') === '(not on the order)' && /^• Tea, assorted: 2 boxes/.test(lineOf(P, 'Tea, assorted')), 'nothing goes on the order by itself: 0 lids on hand under a minimum of 3 isn’t ordered, the flagged tea is');
 check(!/min \d|no min set|>Low<|>Plenty<|>No min</.test(P.count.render({ sub: 'count' }) + P.count.render({ sub: 'order' })), 'Count and Order show no minimums');
 P.act('inv-flag', { line: 'ln-lids' });
-check(/^• Cup lids: 1 sleeve .*have 0 sleeves/.test(lineOf(P, 'Cup lids')), 'Order on a line puts it on the list, for 1: ' + lineOf(P, 'Cup lids'));
+check(/^• Cup lids: 1 sleeve /.test(lineOf(P, 'Cup lids')) && /have 0 sleeves/.test(orderRowOf(P, 'ln-lids')), 'Order on a line puts it on the list, for 1: ' + lineOf(P, 'Cup lids') + ' | ' + orderRowOf(P, 'ln-lids'));
 for (let i = 0; i < 3; i++) P.act('ord-inc', { line: 'ln-lids' });
 check(/^• Cup lids: 4 sleeves /.test(lineOf(P, 'Cup lids')), 'bumped by hand to 4 sleeves');
 P.st.edit('inv', (inv) => { inv.lines.find((l) => l.id === 'ln-lids').products[0].perCase = 20; }); // e.g. synced from the other phone
@@ -87,7 +90,7 @@ const counts = { schema: 1, updated: today, history: [{ id: 'h-odd', date: today
 const slot = (doc) => ({ base: JSON.parse(JSON.stringify(doc)), local: JSON.parse(JSON.stringify(doc)), sha: 'x', src: 'id:1' });
 const Q = await phone('Odd', Object.assign(invPhone(), { inv: slot(inv), counts: slot(counts), count: { id: 'c', started: nowIso, counts: { 'p-lids': 2 }, units: { 'p-lids': 'sleeve' + MARK }, orders: {} } })); // 2 lids counted, in a unit with markup in it
 check(Q.stock.orderList().length === 2, '(setup: two lines flagged, with markup in the amount, unit and name)');
-const screens = { Count: Q.count.render({ sub: 'count' }), Totals: Q.count.render({ sub: 'totals' }), Order: Q.count.render({ sub: 'order' }), History: Q.count.render({ sub: 'history' }) };
+const screens = { Count: Q.count.render({ sub: 'count' }), Totals: Q.count.render({ sub: 'totals' }), Order: Q.count.render({ sub: 'order' }), History: Q.count.render({ sub: 'history' }), 'Printed count sheet': Q.print.countHTML() };
 Q.stock.setRoom('kitchen'); screens['Count, second room'] = Q.count.render({ sub: 'count' }); Q.stock.setRoom('servery');
 check(/Counted [^<]*by B&lt;u&gt;/.test(screens.Totals) && /id="oq-ln-coffee"/.test(screens.Count), '(setup: Totals shows who counted, and a flagged line’s stepper is on Count)');
 for (const so of ['often', 'az', 'order']) { Q.act('item-sort', { id: so }); screens['Items, sorted ' + so] = Q.count.render({ sub: 'items' }); }
@@ -138,7 +141,7 @@ console.log('\n5. Full cases and loose units, counted separately');
   for (let i = 0; i < 7; i++) C5.act('inv-split', { pid: 'p-napkins', part: 'l', d: '1' });
   check(Math.abs(C5.S.count.counts['p-napkins'] - 2.35) < 1e-9, '2 cases + 7 sleeves is stored as 2.35 cases: ' + C5.S.count.counts['p-napkins']);
   C5.act('inv-flag', { line: 'ln-napkins' });
-  check(/have 2 cases \+ 7 sleeves/.test(lineOf(C5, 'Napkins')), 'the order shows what’s on hand as "2 cases + 7 sleeves": ' + lineOf(C5, 'Napkins'));
+  check(/have 2 cases \+ 7 sleeves/.test(orderRowOf(C5, 'ln-napkins')), 'the Order tab shows what’s on hand as "2 cases + 7 sleeves": ' + orderRowOf(C5, 'ln-napkins'));
   C5.type({ split: 'l', pid: 'p-napkins' }, '19', 'change');
   check(Math.abs(C5.S.count.counts['p-napkins'] - 2.95) < 1e-9, 'typing 19 in the loose box keeps the 2 cases: ' + C5.S.count.counts['p-napkins']);
   C5.type({ split: 'c', pid: 'p-napkins' }, '', 'change');
@@ -156,7 +159,7 @@ console.log('\n5. Full cases and loose units, counted separately');
   C5.act('inv-clear', { pid: 'p-napkins' });
   for (let i = 0; i < 14; i++) C5.act('inv-split', { pid: 'p-napkins', part: 'l', d: '1' });
   C5.act('inv-split', { pid: 'p-napkins', part: 'c', d: '1' });
-  check(/1 case \+ 14 sleeves/.test(orderMsg(C5)), '15 a case: 1 case + 14 sleeves shows back as that, not 1 case + 13.99');
+  check(/have 1 case \+ 14 sleeves/.test(orderRowOf(C5, 'ln-napkins')), '15 a case: 1 case + 14 sleeves shows back as that, not 1 case + 13.99: ' + orderRowOf(C5, 'ln-napkins'));
 }
 
 console.log('\n6. Changing the unit converts instead of misreading');
@@ -525,6 +528,103 @@ console.log('\n12. Items: the quick-edit ledger');
   check(!/<input|<select|ip-more|data-act="pc-step"|data-act="inv-flag"/.test(rp) && words(rp).includes('To order: 2 boxes') && words(rp).includes('In all'), 'view only: the panel shows on hand, case size and the order amount, with nothing to change');
   R.count.acts['item-freq'](actEl({ line: 'ln-tea' }));
   check(!R.st.I().lines.find((l) => l.id === 'ln-tea').freq, 'view only: how often can’t be stepped');
+}
+
+console.log('\n13. The Order tab, History and the printed count sheet');
+{
+  const O = await bare('Orders', (inv) => { inv.lines.find((l) => l.id === 'ln-coffee').freq = 'few'; inv.lines.find((l) => l.id === 'ln-cups').freq = 'week'; });
+  const K = O.stock, order = () => O.count.render({ sub: 'order' });
+  const words = (h) => unesc(h.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const rowIds = (h) => Array.from(h.matchAll(/<li class="orow" id="O-([^"]+)"/g)).map((m) => m[1]);
+  const rowHTML = (h, id) => { const i = h.indexOf('id="O-' + id + '"'); return i < 0 ? '' : h.slice(i, h.indexOf('</li>', i)); };
+
+  // Nothing flagged: say how things get on the list, and offer nothing to send or place.
+  let h = order();
+  check(/Nothing is flagged yet\. Go to Count and tap Order on any line\. Nothing lands here on its own\./.test(h) && /data-act="go" data-id="#count">Go to Count</.test(h), 'with nothing flagged, the Order tab says how lines get there and has a button to Count');
+  check(!/id="order-text"|data-act="order-place"|data-act="ord-copy"/.test(h) && /<h2 class="sub-title go" id="ord-h" tabindex="-1">To order <span class="n">0</.test(h), '…and no message, Copy or Order placed (nothing to send), under a To order heading at 0');
+
+  // Three lines flagged: cups (20 a case, so by the case), straws (two products, one picked), boxes (two products, none picked).
+  for (const id of ['ln-boxes', 'ln-straws', 'ln-cups']) O.act('inv-flag', { line: id });
+  tap(O, 'p-cups', 'c', 2); tap(O, 'p-cups', 'l', 3);          // 2 cases + 3 sleeves in the first room, not saved
+  K.setRoom('kitchen'); tap(O, 'p-cups', 'l', 15); O.act('count-save'); K.setRoom('servery'); // 15 sleeves saved in the second
+  h = order();
+  check(JSON.stringify(rowIds(h)) === JSON.stringify(['ln-cups', 'ln-straws', 'ln-boxes']), 'one row per flagged line, A to Z: ' + rowIds(h).join(', '));
+  const cups = rowHTML(h, 'ln-cups');
+  check(/<h3 class="lname">Paper cups, 12 oz<\/h3>/.test(cups) && words(cups).includes('have 2 cases + 18 sleeves (counting now, not saved) · Acme A-12 · flagged by BB'), 'a row says what’s on hand in both rooms, marked when part of it isn’t saved, the product and who flagged it: ' + words(cups));
+  check(/<button class="btn orm" id="OR-ln-cups" data-act="ord-remove" data-line="ln-cups" aria-label="Remove Paper cups, 12 oz from the order">Remove<\/button>/.test(cups), 'each row has a Remove button named for its line');
+  check(/id="oq-ln-cups" data-oline="ln-cups"[^>]*value="1"/.test(cups) && /id="OU-ln-cups">case</.test(cups) && /data-act="ord-inc" data-line="ln-cups"/.test(cups) && !/olabel/.test(cups), 'and its amount with a stepper: 1 case (one, not “1 cases”)');
+  O.act('ord-inc', { line: 'ln-cups' });
+  check(/id="oq-ln-cups"[^>]*value="2"/.test(order()) && /id="OU-ln-cups">cases</.test(order()), 'plus one: 2 cases');
+  // Lids saved in sleeves in the first room, then moved to cases with no case size: that count can't be read now.
+  O.act('inv-flag', { line: 'ln-lids' });
+  O.st.edit('counts', (c) => { c.history.push({ id: 'h-lids', date: today, savedAt: new Date(Date.now() - 864e5).toISOString(), by: 'AA', place: 'servery', counts: { 'p-lids': 8 }, units: { 'p-lids': 'sleeve' }, per: {}, orderCount: 0, text: 'x' }); });
+  O.st.edit('inv', (inv) => { inv.lines.find((l) => l.id === 'ln-lids').unit = 'case'; });
+  check(words(rowHTML(order(), 'ln-lids')).includes('Cup lids count again ·'), 'a line whose count can’t be read in today’s unit says “count again”: ' + words(rowHTML(order(), 'ln-lids')).slice(0, 40));
+  O.act('inv-flag', { line: 'ln-lids' });
+  O.st.edit('counts', (c) => { c.history = c.history.filter((x) => x.id !== 'h-lids'); });
+  O.st.edit('inv', (inv) => { inv.lines.find((l) => l.id === 'ln-lids').unit = 'sleeve'; });
+  check(words(rowHTML(h, 'ln-straws')).includes('Paper straws, Acme A-30') && /<em>pick which product<\/em>/.test(rowHTML(h, 'ln-boxes')), 'a line with several products names the one to order, or asks for one to be picked');
+
+  // The message: the title, who it's from, then each line. No heading word, and no amounts on hand.
+  const msg = orderMsg(O).split('\n');
+  check(/^Sample inventory order · \w{3}, \w{3} \d{1,2}$/.test(msg[0]) && msg[1] === 'From BB' && msg[2] === '', 'the message starts with the order’s title and date, then who it’s from: ' + msg.slice(0, 2).join(' | '));
+  check(JSON.stringify(msg.slice(3)) === JSON.stringify(['• Paper cups, 12 oz: 2 cases (Acme A-12)', '• Straws: 1 box (Paper straws, Acme A-30)', '• To-go boxes: 1 sleeve']), 'then one line per item, with the product to order: ' + msg.slice(3).join(' | '));
+  check(!/ORDER|have /.test(orderMsg(O)), 'no ORDER heading, and what’s on hand stays off the message (it can include a count that isn’t saved)');
+  check(/<section class="oplace"[^>]*>.*data-act="order-place"/.test(order()) && /data-act="ord-copy"/.test(order()) && /data-act="ord-share"/.test(order()), 'Copy, Share and Order placed are there');
+
+  // Remove takes a line off for everyone; focus moves to the next row's Remove, then the one before, then the heading.
+  const realGet = document.getElementById, focused = [];
+  document.getElementById = (id) => (/^(OR-|ord-h)/.test(id) ? { id, focus() { focused.push(id); } } : null);
+  try {
+    O.act('ord-remove', { line: 'ln-straws' });
+    check(!K.flagOf(O.st.I().lines.find((l) => l.id === 'ln-straws')) && JSON.stringify(rowIds(order())) === JSON.stringify(['ln-cups', 'ln-boxes']) && focused.pop() === 'OR-ln-boxes', 'Remove takes the line off the shared list, and focus goes to the next row’s Remove');
+    O.act('ord-remove', { line: 'ln-boxes' });
+    check(focused.pop() === 'OR-ln-cups', '…the last row’s Remove sends focus to the row before');
+    O.act('ord-dec', { line: 'ln-cups' }); O.act('ord-dec', { line: 'ln-cups' });
+    check(!K.orderList().length && focused.pop() === 'ord-h' && /Nothing is flagged yet/.test(order()), 'minus from 1 on the Order tab takes it off the same way; with the list empty, focus goes to the heading');
+  } finally { document.getElementById = realGet; }
+
+  // History: each count's room, day, time and who; the newest count of each room is marked In Totals.
+  O.act('inv-step', { pid: 'p-lids', d: '1' }); O.act('count-save');                       // cups and lids: 2 products
+  await new Promise((r) => setTimeout(r, 5)); // saves on a phone are seconds apart, never in the same millisecond
+  for (const pid of ['p-lids', 'p-soap', 'p-coffee']) O.act('inv-step', { pid, d: '1' }); O.act('count-save'); // a newer one: 3
+  O.act('inv-flag', { line: 'ln-tea' }); O.act('order-place', { armed: '1' });
+  const hist = O.count.render({ sub: 'history' });
+  const sums = Array.from(hist.matchAll(/<summary>([\s\S]*?)<\/summary>/g)).map((m) => words(m[1]));
+  // Saved a moment apart, so found by what they say rather than where they sit.
+  const find = (re) => sums.filter((x) => re.test(x));
+  const [ordS] = find(/Order · 1 item/), [newS] = find(/Servery count · 3 products/), [oldS] = find(/Servery count · 2 products/), [kitS] = find(/Kitchen count/);
+  check(sums.length === 4 && /^\w{3}, \w{3} \d{1,2} by BB · \d{1,2}:\d\d [AP]M Order · 1 item Placed /.test(ordS || ''), 'an order shows its day, who placed it, the time and what it is: ' + ordS);
+  check(/^\w{3}, \w{3} \d{1,2} counted by BB · \d{1,2}:\d\d [AP]M Servery count · 3 products counted In Totals$/.test(newS || ''), 'a count shows its day, who counted, the time, its room, and In Totals when it’s the room’s newest: ' + newS);
+  check(!!oldS && !oldS.includes('In Totals'), 'an older count of the same room isn’t in Totals: ' + oldS);
+  check(/Kitchen count · 1 product counted In Totals$/.test(kitS || ''), 'the other room’s newest count is: ' + kitS);
+  check(/<b class="hroom">Servery<\/b> count/.test(hist) && /data-act="hist-del" data-id="[^"]+" data-kind="order"/.test(hist) && /data-act="hist-del" data-id="[^"]+" data-kind="count"/.test(hist), 'the room stands out, and Delete knows whether it’s an order or a count');
+  const old = (await fresh('OldHist')).count.render({ sub: 'history' });
+  const oldSums = Array.from(old.matchAll(/<summary>([\s\S]*?)<\/summary>/g)).map((m) => words(m[1]));
+  check(oldSums.filter((x) => x.includes('In Totals')).length === 2 && oldSums.filter((x) => /Servery count · \d+ products? counted · 2 to order/.test(x)).length === 3, 'counts saved before rooms show as the first room’s, with their order; one per room is In Totals: ' + oldSums.map((x) => x.slice(0, 60)).join(' | '));
+
+  // The printed sheet: a column per room and one to order, no minimum, in the Count screen's order.
+  const sheet = O.print.countHTML();
+  const heads = Array.from(sheet.matchAll(/<thead><tr>([\s\S]*?)<\/tr><\/thead>/g)).map((m) => words(m[1]));
+  check(heads.length > 0 && heads.every((x) => x === 'Item Servery Kitchen To order'), 'every table on the count sheet has Item, a column per room, and To order: ' + heads[0]);
+  check(!/Min|minimum/i.test(sheet) && /Servery: date _+ by _+ &nbsp; &nbsp; Kitchen: date _+ by _+/.test(sheet), 'no minimum column, and a date and name to fill in for each room');
+  const printed = Array.from(sheet.matchAll(/<tr><td>([^<]*) <span class="pv-small">([^<]*)<\/span>/g)).map((m) => [unesc(m[1]), unesc(m[2])]);
+  const onScreen = linesIn(O.count.render({ sub: 'count' }).split('<details class="more">')[0]);
+  check(JSON.stringify(printed.map((x) => x[0])) === JSON.stringify(onScreen), 'lines print in the Count screen’s order (how often, then section, then A to Z): ' + printed.map((x) => x[0]).join(', '));
+  const how = Object.fromEntries(printed);
+  check(how['Paper cups, 12 oz'] === 'cases + loose sleeves' && how['Napkins'] === 'cases' && how['To-go boxes'] === '2 products · sleeves' && how['Dish soap'] === 'each', 'under each name, what it’s counted in: ' + ['Paper cups, 12 oz', 'Napkins', 'To-go boxes', 'Dish soap'].map((n) => how[n]).join(' | '));
+  check(Array.from(sheet.matchAll(/<h3 class="pv-h3">([^<]*)</g)).map((m) => m[1]).join() === 'Every few days,Weekly,Not regular' && /<h4 class="pv-band">/.test(sheet), 'how-often groups are named, with sections under them');
+  check(!/Hot cocoa|Sanitizer wipes|Foam cups/.test(sheet), 'lines off the order sheet aren’t printed');
+  const plain = (await bare('Plain')).print.countHTML();
+  check(!/pv-h3/.test(plain) && /<h3 class="pv-band">/.test(plain), 'with every line in one group, the group isn’t named and sections are the headings');
+
+  // View only: the list and the message, nothing to change.
+  const R = await bare('OrdersRO', (inv) => { inv.lines.find((l) => l.id === 'ln-tea').flag = { n: 2, unit: 'box', at: new Date().toISOString(), by: 'AA' }; });
+  R.S.settings.perm = { inv: { push: false } };
+  const rh = R.count.render({ sub: 'order' });
+  check(/<span class="ltotal">2 boxes<\/span>/.test(rowHTML(rh, 'ln-tea')) && !/data-act="ord-remove"|data-oline|data-act="order-place"/.test(rh) && /id="order-text"/.test(rh) && /data-act="ord-copy"/.test(rh), 'view only: each line’s amount as text, the message and Copy; no Remove, stepper or Order placed');
+  R.act('ord-remove', { line: 'ln-tea' });
+  check(R.stock.orderList().length === 1, 'view only: Remove does nothing');
 }
 
 T.done();

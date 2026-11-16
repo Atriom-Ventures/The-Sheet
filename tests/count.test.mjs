@@ -86,7 +86,9 @@ const counts = { schema: 1, updated: today, history: [{ id: 'h-odd', date: today
 const slot = (doc) => ({ base: JSON.parse(JSON.stringify(doc)), local: JSON.parse(JSON.stringify(doc)), sha: 'x', src: 'id:1' });
 const Q = await phone('Odd', Object.assign(invPhone(), { inv: slot(inv), counts: slot(counts), count: { id: 'c', started: nowIso, counts: {}, orders: {} } }));
 check(Q.stock.orderList().length === 2, '(setup: two lines flagged, with markup in the amount, unit and name)');
-const screens = { Count: Q.count.render({ sub: 'count' }), Order: Q.count.render({ sub: 'order' }), History: Q.count.render({ sub: 'history' }) };
+const screens = { Count: Q.count.render({ sub: 'count' }), Totals: Q.count.render({ sub: 'totals' }), Order: Q.count.render({ sub: 'order' }), History: Q.count.render({ sub: 'history' }) };
+Q.stock.setRoom('kitchen'); screens['Count, second room'] = Q.count.render({ sub: 'count' }); Q.stock.setRoom('servery');
+check(/Counted [^<]*by B&lt;u&gt;/.test(screens.Totals) && /id="oq-ln-coffee"/.test(screens.Count), '(setup: Totals shows who counted, and a flagged line’s stepper is on Count)');
 Q.act('item-open', { id: 'ln-cups' });
 screens['Items, with an item open'] = Q.count.render({ sub: 'items' });
 for (const [name, h] of Object.entries(screens)) {
@@ -96,8 +98,9 @@ for (const [name, h] of Object.entries(screens)) {
 
 /* ---------- 4 to 7: added in 1.6 ---------- */
 const countHTML = (P) => P.count.render({ sub: 'count' });
-const bands = (h) => Array.from(h.matchAll(/<h2 class="band">([^<]*)<\/h2>/g)).map((m) => m[1]);
-const linesIn = (h) => Array.from(h.matchAll(/<h3 class="lname">([^<]*)<\/h3>/g)).map((m) => unesc(m[1]));
+// Section bands are h2 on Items and h3 on Count (under a how-often group); line names h3 or h4.
+const bands = (h) => Array.from(h.matchAll(/<h([23]) class="band">([^<]*)<\/h\1>/g)).map((m) => m[2]);
+const linesIn = (h) => Array.from(h.matchAll(/<h([34]) class="lname">([^<]*)<\/h\1>/g)).map((m) => unesc(m[2]));
 const fresh = async (name, change) => {
   const inv = fixture('inventory.json'); if (change) change(inv);
   const st = invPhone();
@@ -341,6 +344,79 @@ console.log('\n10. Flags, how often, and Order placed');
   check(!!K.flagOf(ln('ln-cups')), 'a line cleared by a phone whose clock runs ahead can still be flagged again');
   F.st.edit('inv', (inv) => { const l = inv.lines.find((x) => x.id === 'ln-lids'); l.flag = { n: 4, unit: 'sleeve', at: '2026-01-01T00:00:00.000Z', by: 'AA' }; l.cleared = '2026-01-02T00:00:00.000Z'; });
   check(!K.flagOf(ln('ln-lids')) && !orderMsg(F).includes('Cup lids'), 'a flag from before its line was last cleared doesn’t count');
+}
+
+console.log('\n11. The Count screen: room tabs, what each line shows, the Order stepper, how-often groups');
+{
+  const V = await bare('Screen', (inv) => { inv.lines.find((l) => l.id === 'ln-coffee').freq = 'few'; inv.lines.find((l) => l.id === 'ln-cups').freq = 'week'; });
+  const K = V.stock, room = () => countHTML(V), tot = () => V.count.render({ sub: 'totals' });
+  const pressed = (h) => (/data-act="count-room" data-id="(\w+)" aria-pressed="true"/.exec(h) || [])[1];
+  const card = (h, id) => { const i = h.indexOf('id="L-' + id + '"'); return i < 0 ? '' : h.slice(i, h.indexOf('</article>', i)); };
+  const words = (h) => unesc(h.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const md = ((d) => (d.getMonth() + 1) + '/' + d.getDate())(new Date());
+  let h = room();
+  check(pressed(h) === 'servery' && /data-act="count-room" data-id="kitchen"/.test(h) && /data-act="count-room" data-id="totals"/.test(h) && /data-act="count-save"[^>]*>.*Save Servery count</.test(h), 'Count opens on the first room, with Servery, Kitchen and Totals tabs and a Save Servery count button');
+  check(/data-search="inv"/.test(h) && /data-act="inv-filter"/.test(h) && /data-act="inv-how" data-line="ln-cups"/.test(h), 'search, the filters and “How it’s counted” are still there');
+  check(!/data-act="count-save"/.test(V.count.render({ sub: 'order' })), 'Save count is no longer on the Order tab');
+  tap(V, 'p-cups', 'c', 2); tap(V, 'p-cups', 'l', 3);
+  let c = words(card(room(), 'ln-cups'));
+  check(c.includes('Servery: 2 cases + 3 sleeves') && c.includes('Kitchen: not counted') && c.includes('In all: 2 cases + 3 sleeves'), 'under the steppers: this room, the other room and both added up (' + c.slice(c.indexOf('Servery:')) + ')');
+  check(/id="qc-p-cups"[^>]*value="2"/.test(card(room(), 'ln-cups')) && /id="ql-p-cups"[^>]*value="3"/.test(card(room(), 'ln-cups')) && /id="q-p-coffee"/.test(room()), 'full cases and loose side by side on a line with a case size, one box on a line without');
+
+  // Tap Kitchen: its own count, the first room's waits.
+  V.act('count-room', { id: 'kitchen' });
+  h = room(); c = words(card(h, 'ln-cups'));
+  check(K.roomNow() === 'kitchen' && pressed(h) === 'kitchen' && />[^<]*Save Kitchen count</.test(h) && !/id="qc-p-cups"[^>]*value="\d/.test(h), 'tapping Kitchen switches to the Kitchen’s own count: empty boxes, Save Kitchen count');
+  check(K.inProgress('servery').counts['p-cups'] === 43 && c.includes('Kitchen: not counted yet') && c.includes('Servery: not counted') && /Servery count isn’t saved yet/.test(h), 'the Servery count waits untouched; it isn’t saved, so it isn’t shown as the Servery’s number, and the note says so');
+  tap(V, 'p-cups', 'l', 15);
+  V.act('count-save');
+  const saved = V.st.C().history.slice(-1)[0];
+  check(saved.place === 'kitchen' && saved.counts['p-cups'] === 15 && K.roomNow() === 'kitchen' && !Object.keys(V.S.count.counts).length, 'Save Kitchen count files a Kitchen count and starts a fresh Kitchen count');
+  V.act('count-room', { id: 'servery' });
+  c = words(card(room(), 'ln-cups'));
+  check(K.roomNow() === 'servery' && c.includes('Servery: 2 cases + 3 sleeves') && c.includes('Kitchen: 15 sleeves, counted ' + md) && c.includes('In all: 2 cases + 18 sleeves'), 'back in the Servery: its count is back, and the Kitchen’s saved 15 shows with its date and adds in (' + c.slice(c.indexOf('Servery:')) + ')');
+
+  // Totals: saved counts only.
+  h = tot(); c = words(card(h, 'ln-cups'));
+  check(pressed(h) === 'totals' && !/data-act="inv-split"|data-act="inv-step"|data-act="count-save"/.test(h), 'Totals has no steppers and no Save button');
+  check(c.includes('Servery not counted') && c.includes('Kitchen 15 sleeves') && c.includes('In all 15 sleeves') && /Servery<\/dt><dd>Not counted yet/.test(h) && /Kitchen<\/dt><dd>Counted [^<]* by BB/.test(h) && /This phone has a Servery count in progress/.test(h), 'Totals before the Servery is saved: Kitchen only, each room’s date and counter at the top, and a note about the unsaved count');
+  V.act('count-save');
+  h = tot(); c = words(card(h, 'ln-cups'));
+  check(c.includes('Servery 2 cases + 3 sleeves') && c.includes('Kitchen 15 sleeves') && c.includes('In all 2 cases + 18 sleeves') && /Servery<\/dt><dd>Counted [^<]* by BB/.test(h) && !/count in progress/.test(h), 'after Save Servery count, Totals adds both rooms: ' + c.slice(c.indexOf('Servery')));
+  check(/data-act="inv-flag" data-line="ln-cups"/.test(h), 'lines on Totals have an Order button too');
+  V.act('count-room', { id: 'kitchen' });
+  check(K.roomNow() === 'kitchen', 'a room tab from Totals goes to that room');
+
+  // The Order button shows an amount stepper.
+  const cups = () => card(room(), 'ln-cups');
+  check(!/id="oq-ln-cups"/.test(cups()) && /data-act="inv-flag" data-line="ln-cups" aria-pressed="false"/.test(cups()), '(setup: cups not on the order list, no stepper)');
+  V.act('inv-flag', { line: 'ln-cups' });
+  check(/aria-pressed="true"/.test(cups()) && /id="oq-ln-cups"[^>]*value="1"/.test(cups()) && />case</.test(cups()) && /class="line [^"]*flagged[^"]*" id="L-ln-cups"/.test(room()), 'tapping Order puts it on the list and shows a stepper at 1 case (cups come 20 a case)');
+  V.act('ord-inc', { line: 'ln-cups' }); V.act('ord-inc', { line: 'ln-cups' });
+  check(/id="oq-ln-cups"[^>]*value="3"/.test(cups()) && />cases</.test(cups()) && K.flagOf(V.st.I().lines.find((l) => l.id === 'ln-cups')).n === 3, 'plus twice: 3 cases, on the shared list');
+  V.type({ oline: 'ln-cups' }, '6', 'change');
+  check(/id="oq-ln-cups" data-oline="ln-cups"[^>]*value="6"/.test(cups()), 'an amount can be typed in the box on Count too');
+  V.type({ oline: 'ln-cups' }, '1', 'change'); V.act('ord-dec', { line: 'ln-cups' });
+  check(!/id="oq-ln-cups"/.test(cups()) && /aria-pressed="false"/.test(cups()) && !K.orderList().length, 'minus from 1 takes it off the list and the stepper goes');
+
+  // How-often groups, in the four fixed groups' order, then sections A to Z inside each.
+  h = room();
+  const groups = Array.from(h.matchAll(/<h2 class="fg-h" id="FG-(\w+)">([^<]*)<span class="fg-n">([^<]*)</g)).map((m) => [m[1], m[2].trim(), m[3]]);
+  check(JSON.stringify(groups.map((g) => g[1])) === JSON.stringify(['Every few days', 'Weekly', 'Not regular']), 'lines are grouped by how often they’re ordered, in order, empty groups left out: ' + groups.map((g) => g[1]).join(', '));
+  const inGroup = (id) => { const i = h.indexOf('id="FG-' + id + '"'), j = h.indexOf('<h2 class="fg-h"', i + 1); return h.slice(i, j < 0 ? h.indexOf('<details', i) : j); };
+  check(JSON.stringify(linesIn(inGroup('few'))) === JSON.stringify(['Coffee, regular']) && JSON.stringify(linesIn(inGroup('week'))) === JSON.stringify(['Paper cups, 12 oz']) && groups[0][2] === '1 line', 'each line sits in its own group, with the group’s line count');
+  const rest = inGroup('none');
+  check(!linesIn(rest).includes('Coffee, regular') && JSON.stringify(bands(rest)) === JSON.stringify(['Cleaning', 'Coffee and tea', 'Paper goods']) && linesIn(rest).includes('Cup lids'), 'lines with no group set are under Not regular, by section A to Z');
+  K.setFreq('ln-soap', 'month'); h = room();
+  check(linesIn(inGroup('month')).join() === 'Dish soap' && !linesIn(inGroup('none')).includes('Dish soap'), 'a line given a group moves to it');
+
+  // Start over clears only the room on screen.
+  V.act('inv-step', { pid: 'p-lids', d: '1' });
+  V.act('count-room', { id: 'servery' }); V.act('inv-step', { pid: 'p-lids', d: '1' }); V.act('inv-step', { pid: 'p-lids', d: '1' });
+  V.act('count-new');
+  check(/Clear the Servery count in progress/.test(room()), 'Start the Servery count over asks first, naming the room');
+  V.act('count-new-yes');
+  check(!Object.keys(V.S.count.counts).length && ((K.inProgress('kitchen') || {}).counts || {})['p-lids'] === 1, '…and clears the Servery count only; the Kitchen count is kept');
 }
 
 T.done();

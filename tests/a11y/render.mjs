@@ -36,7 +36,7 @@ const { S, B } = await import(path.join(dir, 'js/state.js'));
 const shell = () => mk('top-in').innerHTML + '\n' + mk('nav-in').innerHTML;
 const save = (name, html) => fs.writeFileSync(path.join(out, name + '.html'), '<!doctype html><html lang="en"><body>' + html + '</body></html>');
 save('_shell', shell());
-const routes = ['#now', '#book', '#book/cards', '#book/sheet', '#book/day', '#count', '#count/order', '#count/history', '#count/items', '#lead', '#lead/floor', '#lead/msgs', '#lead/train', '#lead/wins', '#lead/printed', '#more', '#quick', '#book/maps', '#book/map/v-now/r-main', '#book/map/v-next/r-patio', '#book/allergens', '#book/allergens/preview'];
+const routes = ['#now', '#book', '#book/cards', '#book/sheet', '#book/day', '#count', '#count/totals', '#count/order', '#count/history', '#count/items', '#lead', '#lead/floor', '#lead/msgs', '#lead/train', '#lead/wins', '#lead/printed', '#more', '#quick', '#book/maps', '#book/map/v-now/r-main', '#book/map/v-next/r-patio', '#book/allergens', '#book/allergens/preview'];
 for (const h of routes) { location.hash = h; await new Promise((r) => setTimeout(r, 10)); save(h.slice(1).replace(/\//g, '-'), mk('view').innerHTML); }
 // Edit mode in the book
 location.hash = '#book'; app.ui.editing = true; app.renderView(); save('book-edit', mk('view').innerHTML); app.ui.editing = false;
@@ -85,6 +85,9 @@ if (task) save('sheet-task-edit', act('task-edit', { id: task.id }));
 save('sheet-print', act('print', { kind: 'book' }));
 const tm = /data-act="open-tmpl" data-id="([^"]+)"/.exec((location.hash = '#lead/msgs', mk('view').innerHTML));
 if (tm) save('sheet-tmpl', act('open-tmpl', { id: tm[1] }));
+// Count in the second room, with its Start over question open.
+location.hash = '#count'; app.acts['count-room']({ dataset: { id: 'kitchen' } }); app.acts['count-new']({ dataset: {} }); save('count-kitchen', mk('view').innerHTML);
+app.acts['count-new-no']({ dataset: {} }); app.acts['count-room']({ dataset: { id: 'servery' } });
 // How a line is counted (one in sleeves with a per-case number, one in cases), and a section's name.
 location.hash = '#count';
 save('sheet-how-sleeves', act('inv-how', { line: 'ln-cups' }));

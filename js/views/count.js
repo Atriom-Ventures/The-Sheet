@@ -3,7 +3,7 @@
 
 import { app } from '../app.js';
 import { S, I, C, save, edit, hasInv, signName, whoAmI } from '../state.js';
-import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, placeName, placeOf, freqName, roomNow, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, orderList, placeOrder, saveCount, stampLine } from '../stock.js';
+import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, PLACES, placeName, placeOf, FREQS, freqOf, freqName, roomNow, setRoom, inProgress, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, orderList, placeOrder, saveCount, stampLine } from '../stock.js';
 import { autoSync, canWrite, perm, connOf } from '../sync.js';
 import { setAtPath, markGone } from '../merge.js';
 import { esc, fmtNum, parseQty, round2, fmtShort, dateOf, uid, slug, copyText, shareText, todayKey, $, cssEsc, debounce, ago, daysSince, clone } from '../util.js';
@@ -253,15 +253,17 @@ function productDesc(line, p, withName) {
   if (p.note) bits.push('<em>' + esc(p.note) + '</em>');
   return bits.join(' · ');
 }
-function lineHead(line, st) {
-  const multi = line.products.length > 1, bits = [], side = [];
+/* A line's name and details. `st` is how far it's counted in the room on screen (null on Totals, which
+   has no count in progress). `lv` is the name's heading level: 4 under a how-often group and a section. */
+function lineHead(line, st, lv) {
+  const multi = line.products.length > 1, bits = [], side = [], h = 'h' + (lv === 3 ? 3 : 4);
   if (line.note) bits.push(esc(line.note));
   if (!multi) { const d = productDesc(line, line.products[0], true); if (d) bits.push(d); }
   if (line.state !== 'active') side.push(stateTag(line.state));
-  if (multi && st.n) side.push('<span class="ltotal">' + esc(fmtQty(st.total, line.unit)) + '</span>');
-  if (line.state === 'active') side.push(pill(st));
+  if (st && multi && st.n) side.push('<span class="ltotal">' + esc(fmtQty(st.total, line.unit)) + '</span>');
+  if (st && line.state === 'active') side.push(pill(st));
   const dup = multi ? '<div class="lmeta dup">' + line.products.length + ' products add up here' + (line.state === 'active' && !prefProduct(line) ? '. Pick one to keep ordering.' : '') + '</div>' : '';
-  return '<div class="lh-main"><h3 class="lname">' + esc(line.name) + '</h3>' + (bits.length ? '<div class="lmeta">' + bits.join(' · ') + '</div>' : '') + dup + '</div><div class="lh-side">' + side.join('') + '</div>';
+  return '<div class="lh-main"><' + h + ' class="lname">' + esc(line.name) + '</' + h + '>' + (bits.length ? '<div class="lmeta">' + bits.join(' · ') + '</div>' : '') + dup + '</div><div class="lh-side">' + side.join('') + '</div>';
 }
 function quick(line, p) {
   const v = S.count.counts[p.id]; let h = '';
@@ -285,8 +287,8 @@ function countCtl(line, p, label) {
   if (!perCaseOf(p)) return '<div class="pctl">' + stepper('inv-step', pid, '', v, label + ' on hand', unitWord(line.unit, 1), 'decimal', 'id="q-' + esc(pid) + '" data-qty="' + esc(pid) + '"') + unitTag(line, unitWord(line.unit, 2)) + '</div>';
   const s = v == null ? null : splitParts(line, p, v), small = smallUnit(line);
   return '<div class="pctl split">' +
-    '<div class="spl">' + stepper('inv-split', pid, 'c', s && s.cases, 'Full cases, ' + label, 'case', 'numeric', 'id="qc-' + esc(pid) + '" data-split="c" data-pid="' + esc(pid) + '"') + unitTag(line, 'cases') + '</div>' +
-    '<div class="spl">' + stepper('inv-split', pid, 'l', s && s.loose, 'Loose ' + unitWord(small, 2) + ', ' + label, unitWord(small, 1), 'decimal', 'id="ql-' + esc(pid) + '" data-split="l" data-pid="' + esc(pid) + '"') + unitTag(line, 'loose ' + unitWord(small, 2)) + '</div></div>';
+    '<div class="spl">' + unitTag(line, 'full cases') + stepper('inv-split', pid, 'c', s && s.cases, 'Full cases, ' + label, 'case', 'numeric', 'id="qc-' + esc(pid) + '" data-split="c" data-pid="' + esc(pid) + '"') + '</div>' +
+    '<div class="spl">' + unitTag(line, 'loose ' + unitWord(small, 2)) + stepper('inv-split', pid, 'l', s && s.loose, 'Loose ' + unitWord(small, 2) + ', ' + label, unitWord(small, 1), 'decimal', 'id="ql-' + esc(pid) + '" data-split="l" data-pid="' + esc(pid) + '"') + '</div></div>';
 }
 function productRow(line, p, multi) {
   const v = S.count.counts[p.id], seen = seenFor(p.id), label = p.name || line.name;
@@ -296,48 +298,141 @@ function productRow(line, p, multi) {
     '<div class="quick" id="QK-' + esc(p.id) + '">' + quick(line, p) + '</div>' +
     (seen && !lastFor(p.id) && v == null ? '<div class="seen">In the ' + fmtShort(seen.date) + ' photos: ' + esc(seen.text) + '</div>' : '') + '</div>';
 }
-/* The Order button under a line: on means it's on the order list, for everyone who orders. */
-const flagNote = (line) => { const f = flagOf(line); return f ? 'To order: ' + fmtQty(f.n, f.unit) : ''; };
+/* ---------- rooms ----------
+   Count has a tab per room and a Totals tab. A room tab counts that room (its own count in progress,
+   see setRoom); under each line it shows what's counted here, the other room's last saved count, and
+   both added up. Totals shows each room's newest saved count and the sum. All amounts come from
+   totals() in stock.js; nothing here adds numbers up. */
+let shown = 'room'; // which kind of Count tab was drawn last: 'room' or 'totals'
+const ROOM_DESC = { servery: 'Backup stock', kitchen: 'Open, working stock' };
+const otherRoom = (pl) => (PLACES.find((p) => p[0] !== pl) || PLACES[0])[0];
+const curView = () => (shown === 'totals' ? 'totals' : roomNow());
+const totalsFor = (view) => (view === 'totals' ? totals() : totals({ live: view }));
+const longDay = (r) => localDate(r.savedAt || r.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+function roomTabs(view) {
+  return '<div class="seg-c rooms" role="group" aria-label="Room">' + PLACES.concat([['totals', 'Totals']]).map(([id, label]) => '<button data-act="count-room" data-id="' + esc(id) + '" aria-pressed="' + (id === view ? 'true' : 'false') + '">' + esc(label) + '</button>').join('') + '</div>';
+}
+function roomNote(view) {
+  if (view === 'totals') return '<p class="hint room-note">Each room’s newest saved count, added up line by line.</p>';
+  const other = placeName(otherRoom(view)), c = inProgress(otherRoom(view));
+  const waiting = c && c.counts && Object.keys(c.counts).length ? ' This phone’s ' + other + ' count isn’t saved yet, so it isn’t in those numbers.' : '';
+  return '<p class="hint room-note">' + esc(ROOM_DESC[view] + '. Count what’s here. Each line also shows the ' + other + '’s last saved count and both added up.' + waiting) + '</p>';
+}
+/* Totals: which saved count each room's numbers come from, and a reminder about counts not saved yet. */
+function totalsHead(t) {
+  const rows = PLACES.map(([id, name]) => { const r = t.rooms[id]; return '<div><dt>' + esc(name) + '</dt><dd>' + esc(r ? 'Counted ' + longDay(r) + (r.by ? ' by ' + r.by : '') : 'Not counted yet') + '</dd></div>'; }).join('');
+  const waiting = PLACES.filter(([id]) => { const c = inProgress(id); return c && c.counts && Object.keys(c.counts).length; }).map((p) => p[1]);
+  return '<dl class="troom">' + rows + '</dl>' + (waiting.length ? '<p class="note">' + esc('This phone has a ' + waiting.join(' and a ') + ' count in progress. It joins these totals once it’s saved.') + '</p>' : '');
+}
+/* One room's amount of a line, in words. r is that room's entry from totals(). */
+function amtWords(line, r) {
+  if (!r || r.v == null) return r && r.stale ? 'count again (it was counted in another unit)' : 'not counted';
+  let s = fmtHave(line, r.v);
+  if (r.of > 1 && r.n < r.of) s += ' (' + r.n + ' of ' + r.of + ' products)';
+  if (r.stale) s += ', count the rest again';
+  return s;
+}
+const sumWords = (line, row) => 'In all: ' + (row.sum.v != null ? fmtHave(line, row.sum.v) : 'nothing counted yet');
+/* Under a line on a room tab: this room, the other room, and both. When this room's count in progress
+   hasn't reached the line yet, its last saved count still adds in, so it says so. */
+function amountsHTML(line, t, room) {
+  const row = t.lines[line.id]; if (!row) return '';
+  const here = row[room], oth = otherRoom(room), there = row[oth], mine = t.rooms[room], theirs = t.rooms[oth], name = placeName(room);
+  let a = name + ': ';
+  if (here.live) a += amtWords(line, here);
+  else if (here.v != null) a += 'not counted yet. Last saved ' + amtWords(line, here) + (mine ? ' on ' + fmtShort(mine.date) : '');
+  else a += here.stale ? 'not counted yet. The last count was in another unit.' : 'not counted yet';
+  const b = placeName(oth) + ': ' + amtWords(line, there) + (there.v != null && theirs ? ', counted ' + fmtShort(theirs.date) : '');
+  return '<span' + (here.live ? ' class="la-here"' : '') + '>' + esc(a) + '</span><span>' + esc(b) + '</span><span class="la-sum">' + esc(sumWords(line, row)) + '</span>';
+}
+/* On Totals: each room's amount and the sum. */
+function totalsRows(line, t) {
+  const row = t.lines[line.id]; if (!row) return '';
+  return '<dl class="tot">' + PLACES.map(([id, name]) => '<div><dt>' + esc(name) + '</dt><dd>' + esc(amtWords(line, row[id])) + '</dd></div>').join('') +
+    '<div class="tsum"><dt>In all</dt><dd>' + esc(row.sum.v != null ? fmtHave(line, row.sum.v) : 'nothing counted yet') + '</dd></div></dl>';
+}
+
+/* The Order button on a line: on means it's on the shared order list. When it's on, the amount to
+   order shows beside it, with its own stepper (the same actions the Order tab uses). */
+function orderStepper(line, f) {
+  const id = esc(line.id);
+  return '<div class="pctl oqty"><span class="olabel" aria-hidden="true">To order</span><div class="stepper"><button class="step" data-act="ord-dec" data-line="' + id + '" aria-label="Order minus one, ' + esc(line.name) + '">−</button>' +
+    '<input class="qty" id="oq-' + id + '" data-oline="' + id + '" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="' + esc(fmtNum(f.n)) + '" aria-label="Order amount for ' + esc(line.name) + '">' +
+    '<button class="step" data-act="ord-inc" data-line="' + id + '" aria-label="Order plus one, ' + esc(line.name) + '">+</button></div><span class="unit" id="OU-' + id + '">' + esc(unitWord(f.unit, f.n)) + '</span></div>';
+}
 function flagRow(line) {
   if (line.state !== 'active') return '';
-  const f = flagOf(line), note = '<span class="lflag-n" id="LF-' + esc(line.id) + '">' + esc(flagNote(line)) + '</span>';
-  if (ro()) return f ? '<div class="lflag">' + note + '</div>' : '';
-  return '<div class="lflag"><button class="chip" data-act="inv-flag" data-line="' + esc(line.id) + '" aria-pressed="' + (f ? 'true' : 'false') + '" aria-label="' + esc('Order ' + line.name) + '">Order</button>' + note + '</div>';
+  const f = flagOf(line), id = esc(line.id);
+  if (ro()) return f ? '<div class="lflag"><span class="lflag-n">' + esc('To order: ' + fmtQty(f.n, f.unit)) + '</span></div>' : '';
+  return '<div class="lflag" id="LF-' + id + '"><button class="chip ordb" data-act="inv-flag" data-line="' + id + '" aria-pressed="' + (f ? 'true' : 'false') + '" aria-label="' + esc('Order ' + line.name) + '">' + ICON.check + '<span>Order</span></button>' +
+    '<div class="lflag-q" id="LQ-' + id + '">' + (f ? orderStepper(line, f) : '') + '</div></div>';
 }
-function lineCard(line) {
+const cardClass = (line, st) => 'line s-' + (line.state === 'active' ? st.status : 'extra') + (line.products.length > 1 ? ' multi' : '') + (flagOf(line) ? ' flagged' : '');
+function lineCard(line, t, view, lv) {
+  const id = esc(line.id);
+  if (view === 'totals') return '<article class="line tline' + (flagOf(line) ? ' flagged' : '') + '" id="L-' + id + '"><div class="lh">' + lineHead(line, null, lv) + '</div>' + totalsRows(line, t) + flagRow(line) + '</article>';
   const st = lineStat(line, S.count.counts), multi = line.products.length > 1;
-  return '<article class="line s-' + (line.state === 'active' ? st.status : 'extra') + (multi ? ' multi' : '') + '" id="L-' + esc(line.id) + '"><div class="lh" id="LH-' + esc(line.id) + '">' + lineHead(line, st) + '</div>' + line.products.map((p) => productRow(line, p, multi)).join('') + flagRow(line) + '</article>';
+  return '<article class="' + cardClass(line, st) + '" id="L-' + id + '"><div class="lh" id="LH-' + id + '" data-lv="' + lv + '">' + lineHead(line, st, lv) + '</div>' + line.products.map((p) => productRow(line, p, multi)).join('') +
+    '<div class="lamt" id="LA-' + id + '">' + amountsHTML(line, t, view) + '</div>' + flagRow(line) + '</article>';
 }
-function matches(line) {
+function matches(line, view, t) {
   const n = q.trim().toLowerCase();
   if (n && ![line.name, line.note].concat(line.products.flatMap((p) => [p.name, p.brand, p.code])).join(' ').toLowerCase().includes(n)) return false;
   if (filter === 'all') return true;
-  const st = lineStat(line, S.count.counts);
-  if (filter === 'todo') return line.state === 'active' && !st.counted;
+  if (filter === 'todo') {
+    if (line.state !== 'active') return false;
+    // On Totals: not yet counted in every room.
+    if (view === 'totals') { const r = t.lines[line.id]; return !r || PLACES.some(([id]) => !r[id].counted); }
+    return !lineStat(line, S.count.counts).counted;
+  }
   if (filter === 'flag') return !!flagOf(line);
   if (filter === 'multi') return line.products.length > 1;
   return true;
 }
 function progressHTML() {
   const p = progress();
-  return '<div class="prog" id="prog"><div class="prog-row"><span class="prog-big">' + p.counted + '</span><span class="prog-of">of ' + p.total + ' counted</span><span class="prog-stats">' + (p.flagged ? '<b>' + p.flagged + '</b> to order · ' : '') + p.todo + ' to go</span></div><div class="prog-bar"><i style="width:' + (p.total ? p.counted / p.total * 100 : 0).toFixed(1) + '%"></i></div></div>';
+  return '<div class="prog" id="prog"><div class="prog-row"><span class="prog-big">' + p.counted + '</span><span class="prog-of">of ' + p.total + ' counted in ' + esc(placeName(roomNow())) + '</span><span class="prog-stats">' + (p.flagged ? '<b>' + p.flagged + '</b> to order · ' : '') + p.todo + ' to go</span></div><div class="prog-bar"><i style="width:' + (p.total ? p.counted / p.total * 100 : 0).toFixed(1) + '%"></i></div></div>';
 }
-function countList() {
+/* The lines on the order sheet, grouped by how often they're ordered (FREQS, in order), then by
+   section, A to Z. Lines off the sheet follow, as before. */
+function countList(view, t) {
+  view = view || curView(); t = t || totalsFor(view);
+  const ok = (l) => matches(l, view, t);
   let h = '';
-  sections().forEach((c) => {
-    const ls = sortLines(lines().filter((l) => inSection(l, c) && l.state === 'active' && matches(l)));
-    if (ls.length) h += '<section class="inv-cat"><h2 class="band">' + esc(c.name) + '</h2><div class="sheet-l">' + ls.map(lineCard).join('') + '</div></section>';
-  });
-  const extra = sortLines(lines().filter((l) => ['ask', 'useup', 'remove'].includes(l.state) && matches(l)));
-  if (extra.length) h += '<details class="more"><summary class="band">Not on the order sheet <span class="n">' + extra.length + '</span></summary><p class="hint">Count these if you like. They never go on an order.</p><div class="sheet-l">' + extra.map(lineCard).join('') + '</div></details>';
-  const disc = sortLines(lines().filter((l) => l.state === 'disc' && matches(l)));
-  if (disc.length) h += '<details class="more"><summary class="band">Crossed off the sheet <span class="n">' + disc.length + '</span></summary><p class="hint">No longer used. Count what’s left so it gets used up.</p><div class="sheet-l">' + disc.map(lineCard).join('') + '</div></details>';
+  for (const [fid, fname] of FREQS) {
+    let g = '', n = 0;
+    sections().forEach((c) => {
+      const ls = sortLines(lines().filter((l) => inSection(l, c) && l.state === 'active' && freqOf(l) === fid && ok(l)));
+      if (!ls.length) return;
+      n += ls.length;
+      g += '<section class="inv-cat"><h3 class="band">' + esc(c.name) + '</h3><div class="sheet-l">' + ls.map((l) => lineCard(l, t, view, 4)).join('') + '</div></section>';
+    });
+    if (n) h += '<section class="fgroup" aria-labelledby="FG-' + fid + '"><h2 class="fg-h" id="FG-' + fid + '">' + esc(fname) + ' <span class="fg-n">' + n + (n === 1 ? ' line' : ' lines') + '</span></h2>' + g + '</section>';
+  }
+  const extra = sortLines(lines().filter((l) => ['ask', 'useup', 'remove'].includes(l.state) && ok(l)));
+  if (extra.length) h += '<details class="more"><summary class="band">Not on the order sheet <span class="n">' + extra.length + '</span></summary><p class="hint">Count these if you like. They never go on an order.</p><div class="sheet-l">' + extra.map((l) => lineCard(l, t, view, 3)).join('') + '</div></details>';
+  const disc = sortLines(lines().filter((l) => l.state === 'disc' && ok(l)));
+  if (disc.length) h += '<details class="more"><summary class="band">Crossed off the sheet <span class="n">' + disc.length + '</span></summary><p class="hint">No longer used. Count what’s left so it gets used up.</p><div class="sheet-l">' + disc.map((l) => lineCard(l, t, view, 3)).join('') + '</div></details>';
   return h || empty('No lines match.');
 }
-function countTab() {
-  return progressHTML() + '<div class="tools"><label class="sr" for="inv-q">Search</label><input id="inv-q" class="search-in" type="search" data-search="inv" placeholder="Search items" value="' + esc(q) + '" autocomplete="off">' +
+/* Save the room's count, from the bottom of its tab. */
+function saveBlock(room) {
+  const p = progress(), name = placeName(room), other = placeName(otherRoom(room));
+  const todo = sortLines(activeLines().filter((l) => !lineStat(l, S.count.counts).counted));
+  let h = '<section class="csave" aria-labelledby="csave-h"><h2 class="sub-title" id="csave-h">' + esc(name + ' count') + '</h2><p class="hint"><span id="csave-n">' + p.counted + ' of ' + p.total + '</span> items counted so far.' +
+    (ro() ? '' : esc(' Saving files it in History as the newest ' + name + ' count, for everyone, and starts a fresh one. A line left blank reads as not counted in the ' + name + ' until it’s counted and saved again.')) + '</p>';
+  if (!ro()) h += '<div class="row-actions"><button class="btn primary" data-act="count-save">' + ICON.check + ' ' + esc('Save ' + name + ' count') + '</button></div>';
+  if (todo.length) h += '<details class="todo-list"><summary>Not counted yet (' + todo.length + ')</summary><p>' + todo.map((l) => esc(l.name)).join(' · ') + '</p></details>';
+  h += confirmNew ? '<div class="confirm"><p>' + esc('Clear the ' + name + ' count in progress and start over? Saved counts stay in History, and the ' + other + ' count isn’t touched.') + '</p><div class="row-actions"><button class="btn" data-act="count-new-no">Keep counting</button><button class="btn danger solid" data-act="count-new-yes">Clear and start over</button></div></div>'
+    : '<p><button class="link" data-act="count-new">' + esc('Start the ' + name + ' count over') + '</button></p>';
+  return h + '</section>';
+}
+function countTab(view) {
+  const t = totalsFor(view);
+  return roomTabs(view) + roomNote(view) + (view === 'totals' ? totalsHead(t) : progressHTML()) +
+    '<div class="tools"><label class="sr" for="inv-q">Search</label><input id="inv-q" class="search-in" type="search" data-search="inv" placeholder="Search items" value="' + esc(q) + '" autocomplete="off">' +
     '<div class="chips">' + [['all', 'All'], ['todo', 'To count'], ['flag', 'To order'], ['multi', 'Several products']].map(([k, l]) => chip('inv-filter', k, l, filter === k)).join('') + '</div></div>' +
-    '<div class="inv-list" id="inv-list">' + countList() + '</div>';
+    '<div class="inv-list" id="inv-list">' + countList(view, t) + '</div>' + (view === 'totals' ? '' : saveBlock(view));
 }
 /* One count, in the line's unit. Remembers that unit so a later unit change can convert it. */
 function putCount(pid, val) {
@@ -361,18 +456,36 @@ function refreshProduct(pid) {
   const cardEl = document.getElementById('L-' + line.id);
   if (cardEl) {
     const st = lineStat(line, S.count.counts);
-    cardEl.className = 'line s-' + (line.state === 'active' ? st.status : 'extra') + (line.products.length > 1 ? ' multi' : '');
-    const head = document.getElementById('LH-' + line.id); if (head) head.innerHTML = lineHead(line, st);
+    cardEl.className = cardClass(line, st);
+    const head = document.getElementById('LH-' + line.id); if (head) head.innerHTML = lineHead(line, st, +head.dataset.lv || 4);
+    const amt = document.getElementById('LA-' + line.id); if (amt) amt.innerHTML = amountsHTML(line, totals({ live: roomNow() }), roomNow());
     const v = S.count.counts[pid], p = line.products.find((x) => x.id === pid);
     if (p && perCaseOf(p)) { const s = v == null ? null : splitParts(line, p, v); showIn(document.getElementById('qc-' + pid), s && s.cases); showIn(document.getElementById('ql-' + pid), s && s.loose); }
     else showIn(document.getElementById('q-' + pid), v);
     const row = document.getElementById('P-' + pid); if (row) { row.classList.toggle('done', v != null); const s = row.querySelector('.seen'); if (s && v != null) s.remove(); }
     const qk = document.getElementById('QK-' + pid); if (qk && p) qk.innerHTML = quick(line, p);
   }
+  refreshTally();
+}
+/* The numbers at the top and bottom of a room tab, and the Order tab's count. */
+function refreshTally() {
   const prog = document.getElementById('prog'); if (prog) prog.outerHTML = progressHTML();
+  const cs = document.getElementById('csave-n'); if (cs) { const p = progress(); cs.textContent = p.counted + ' of ' + p.total; }
   const ob = $('[data-act="go-csub"][data-id="order"]'); if (ob) ob.textContent = orderLabel();
 }
 const orderLabel = () => { const n = orderList().length; return 'Order' + (n ? ' (' + n + ')' : ''); };
+/* After a line goes on or off the order list, or its amount changes: its button, its stepper, the tallies.
+   The button is updated, not redrawn, so focus stays on it. */
+function refreshFlag(lineId, focusBtn) {
+  const l = lines().find((x) => x.id === lineId); if (!l) return;
+  const f = flagOf(l), row = document.getElementById('LF-' + lineId);
+  const btn = row && row.querySelector('[data-act="inv-flag"]');
+  if (btn) btn.setAttribute('aria-pressed', f ? 'true' : 'false');
+  const q2 = document.getElementById('LQ-' + lineId); if (q2) q2.innerHTML = f ? orderStepper(l, f) : '';
+  const card = document.getElementById('L-' + lineId); if (card) card.classList.toggle('flagged', !!f);
+  if (focusBtn && btn) try { btn.focus(); } catch (e) { /* ignore */ }
+  refreshTally();
+}
 
 /* ---------- order tab ----------
    The list is the flagged lines, shared by everyone who orders. Nothing lands here on its own. */
@@ -384,28 +497,31 @@ function orderRow(o, have) {
   return '<div class="orow" id="O-' + id + '"><span class="otick" aria-hidden="true"></span><div class="oinfo"><div class="lname">' + esc(o.l.name) + '</div>' + (meta ? '<div class="lmeta">' + meta + '</div>' : '') + '</div>' + qty + '</div>';
 }
 function orderTab() {
-  const list = orderList(), have = totals({ live: true }).lines, p = progress();
-  const todo = sortLines(activeLines().filter((l) => !lineStat(l, S.count.counts).counted));
+  const list = orderList(), have = totals({ live: true }).lines;
   let h = openOrdersHTML() + '<p class="hint">' + (ro() ? 'Lines flagged to order show here.' : 'Tap Order on a line in Count to put it on this list. Nothing is added on its own.') + '</p>';
   h += '<h2 class="sub-title go">To order <span class="n">' + list.length + '</span></h2>';
   h += list.length ? '<div class="olist">' + list.map((o) => orderRow(o, have[o.l.id] ? have[o.l.id].sum.v : null)).join('') + '</div>' : empty('Nothing is flagged to order.');
   h += '<h2 class="sub-title">Message for ' + esc(I().messaging || 'team chat') + '</h2><pre class="chit" id="order-text">' + esc(orderText(list)) + '</pre>';
   h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button>' + (ro() || !list.length ? '' : '<button class="btn" data-act="order-place">' + ICON.check + ' Order placed</button>') + '</div>';
   if (!ro()) h += '<p class="hint">Order placed files the order in History, where everyone who orders can see it and mark it received, and clears this list.</p>';
-  h += '<h2 class="sub-title">Count in progress</h2><p class="hint">' + p.counted + ' of ' + p.total + ' items counted.' + (ro() ? '' : ' Save count adds it to History and starts a fresh count.') + '</p>';
-  if (!ro()) h += '<div class="row-actions"><button class="btn" data-act="count-save">' + ICON.check + ' Save count</button></div>';
-  if (todo.length) h += '<details class="todo-list"><summary>Not counted yet (' + todo.length + ')</summary><p>' + todo.map((l) => esc(l.name)).join(' · ') + '</p></details>';
-  h += confirmNew ? '<div class="confirm"><p>Clear every count in progress and start over? Saved counts stay in History.</p><div class="row-actions"><button class="btn" data-act="count-new-no">Keep counting</button><button class="btn danger solid" data-act="count-new-yes">Clear and start over</button></div></div>' : '<p><button class="link" data-act="count-new">Start a new count</button></p>';
+  h += '<p class="hint">Counts are saved on Count, one room at a time.</p>';
   return h;
 }
 /* Show a line's order amount again (after a change), and the message with it. */
 function showOrderQty(lineId, force) {
   const l = lines().find((x) => x.id === lineId), f = l ? flagOf(l) : null;
   const inp = document.getElementById('oq-' + lineId); if (inp && f && (force || document.activeElement !== inp)) inp.value = fmtNum(f.n);
+  const u = document.getElementById('OU-' + lineId); if (u && f) u.textContent = unitWord(f.unit, f.n);
   const t = $('#order-text'); if (t) t.textContent = orderText(orderList());
 }
 const NO_FLAG = 'View only: changing the order list needs write access.';
-function unflag(lineId) { setFlag(lineId, false); app.renderView(); toast('Taken off the order list.'); }
+/* Off the list. On Count the line stays, so only its order row changes and focus goes back to its
+   Order button; on the Order tab the row goes, so the tab is drawn again. */
+function unflag(lineId) {
+  setFlag(lineId, false);
+  if (document.getElementById('LQ-' + lineId)) refreshFlag(lineId, true); else app.renderView();
+  toast('Taken off the order list.');
+}
 /* Plus or minus one on a flagged line. Minus at 1 takes it off the list. */
 function stepFlag(lineId, d) {
   if (ro()) { toast(NO_FLAG); return; }
@@ -539,11 +655,11 @@ export function render(route) {
   if (!hasInv()) return empty('No inventory loaded yet. It comes from the inventory repo once you connect. <button class="link inline" data-act="tab" data-id="more">Set up</button>');
   reconcileUnits();
   const sub = route.sub || 'count';
-  let h = accessNote() + reviewHTML() + '<div class="view-top">' + seg('go-csub', SUBS.map(([k, l]) => [k, k === 'order' ? orderLabel() : l]), sub) + '<div class="view-acts"><button class="pill-b" data-act="print" data-kind="count">' + ICON.print + ' Sheet</button></div></div>';
+  let h = accessNote() + reviewHTML() + '<div class="view-top">' + seg('go-csub', SUBS.map(([k, l]) => [k, k === 'order' ? orderLabel() : l]), sub === 'totals' ? 'count' : sub) + '<div class="view-acts"><button class="pill-b" data-act="print" data-kind="count">' + ICON.print + ' Sheet</button></div></div>';
   if (sub === 'order') h += orderTab();
   else if (sub === 'history') h += historyTab();
   else if (sub === 'items') h += itemsTab();
-  else h += countTab();
+  else { shown = sub === 'totals' ? 'totals' : 'room'; h += countTab(curView()); }
   return h;
 }
 
@@ -551,6 +667,16 @@ const stepOf = (pid) => { const l = findLineOfProduct(pid); const n = l ? Number
 function stepBy(pid, d) { const v = S.count.counts[pid]; if (v == null && d < 0) { setCount(pid, 0); return; } setCount(pid, Math.max(0, (v == null ? 0 : v) + d * stepOf(pid))); }
 export const acts = {
   'go-csub': (el) => app.go('#count/' + el.dataset.id),
+  // A room tab, or Totals. Each room keeps its own count in progress (setRoom in stock.js).
+  'count-room': (el) => {
+    const id = el.dataset.id; confirmNew = false;
+    if (id === 'totals') { app.go('#count/totals'); return; }
+    if (!PLACES.some((p) => p[0] === id)) return;
+    setRoom(id);
+    if (shown === 'totals') { app.go('#count'); return; }
+    app.renderView();
+    const b = $('[data-act="count-room"][data-id="' + cssEsc(id) + '"]'); if (b) try { b.focus(); } catch (e) { /* ignore */ }
+  },
   'inv-filter': (el) => { filter = el.dataset.id; const list = $('#inv-list'); if (list) list.innerHTML = countList(); document.querySelectorAll('[data-act="inv-filter"]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.id === filter)); },
   'inv-step': (el) => stepBy(el.dataset.pid, +el.dataset.d < 0 ? -1 : 1),
   'inv-inc': (el) => stepBy(el.dataset.pid, 1),
@@ -590,9 +716,7 @@ export const acts = {
     const id = el.dataset.line, l = lines().find((x) => x.id === id);
     if (!l || !setFlag(id, !flagOf(l))) return;
     el.setAttribute('aria-pressed', flagOf(l) ? 'true' : 'false');
-    const note = document.getElementById('LF-' + id); if (note) note.textContent = flagNote(l);
-    const prog = document.getElementById('prog'); if (prog) prog.outerHTML = progressHTML();
-    const ob = $('[data-act="go-csub"][data-id="order"]'); if (ob) ob.textContent = orderLabel();
+    refreshFlag(id);
   },
   'ord-inc': (el) => stepFlag(el.dataset.line, 1),
   'ord-dec': (el) => stepFlag(el.dataset.line, -1),
@@ -610,14 +734,15 @@ export const acts = {
   'count-save': () => {
     if (ro()) { toast('View only: saving counts needs write access. Copy the order instead.'); return; }
     reconcileUnits();
-    if (!saveCount(countText())) { toast('Count something first.'); return; }
+    const name = placeName(roomNow());
+    if (!saveCount(countText())) { toast('Count something in the ' + name + ' first.'); return; }
     freshCount(); confirmNew = false;
     autoSync('save', 500);
-    toast('Count saved. A fresh count is ready.'); app.go('#count/history');
+    toast(name + ' count saved. A fresh one is ready.'); app.go('#count/history');
   },
   'count-new': () => { confirmNew = true; app.renderView(); },
   'count-new-no': () => { confirmNew = false; app.renderView(); },
-  'count-new-yes': () => { freshCount(); confirmNew = false; toast('Started a new count.'); app.go('#count'); },
+  'count-new-yes': () => { freshCount(); confirmNew = false; toast('Started the ' + placeName(roomNow()) + ' count over.'); app.go('#count'); },
   'hist-copy': async (el) => { const e = hist().find((x) => x.id === el.dataset.id); if (e && await copyText(e.text || '')) toast('Copied.'); },
   'hist-del': (el) => { if (ro()) return; if (!armed(el, 'Delete this count?')) return; edit('counts', (c) => { c.history = (c.history || []).filter((x) => x.id !== el.dataset.id); markGone(c, el.dataset.id); }); autoSync('save', 800); app.renderView(); toast('Deleted.'); },
   'ord-placed': (el) => { setOrder(el.dataset.id, (o) => { o.status = 'placed'; o.placedAt = new Date().toISOString(); o.placedBy = whoAmI(); }); app.renderView(); toast('Marked placed.'); },

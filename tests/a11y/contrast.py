@@ -39,6 +39,7 @@ PAIRS = [
  ('bg','ink',4.5,'allergen tag, in it'), ('ink','surface',4.5,'allergen tag, ask or optional'), ('ink','surface',3,'allergen tag outline'), ('lamp','surface',3,'card state bar: draft'), ('go','surface',3,'card state bar: checked'), ('stop','bg',3,'page that won’t fit: outline'),
  ('#FFFFFF','#15202A',4.5,'printed card: solid chip'), ('#15202A','#FFFFFF',4.5,'printed card: text, dashed chip'), ('#15202A','#E1E7E4',4.5,'printed card: equipment chip, grey box'), ('#3D4852','#FFFFFF',4.5,'printed card: soft text'), ('#55626D','#FFFFFF',4.5,'printed card: grey text'),
  ('#2B7448','#FFFFFF',4.5,'printed card: green headings'), ('#9E5200','#FFFFFF',4.5,'printed card: amber headings, draft tag'), ('#FFFFFF','#2B7448',4.5,'printed card: step numbers, tick'), ('#6B7780','#FFFFFF',3,'printed card: write-in line'),
+ ('bg','marker',4.5,'Count: Order button, on'), ('marker','marker-soft',3,'Count: Order button against its row'), ('ink','marker-soft',4.5,'Count: To order label'), ('muted','marker-soft',4.5,'Count: order unit'), ('field-line','marker-soft',3,'Count: order stepper border on its row'), ('marker','surface',4.5,'Count: order amount'),
  ('ink','lamp-soft',4.5,'notes: not sent yet'), ('ink','go-soft',4.5,'notes: report sent'), ('lamp','surface',4.5,'notes card: not sent'), ('go','surface',4.5,'notes card: sent'), ('band-ink','band',3,'section rename and delete icons'), ('muted','surface',3,'unit chevron'),
 ]
 fails = 0

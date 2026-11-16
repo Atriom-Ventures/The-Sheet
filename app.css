@@ -449,8 +449,11 @@ details.more>.hint{background:var(--surface);border:1px solid var(--line);border
 .unit{color:var(--muted);font-size:13.5px;min-width:4.2em}
 .unit-b{display:inline-flex;align-items:center;gap:2px;min-height:44px;padding:0 6px 0 8px;border:1px solid var(--line-strong);border-radius:999px;background:transparent;color:var(--ink);font-weight:600;text-align:left}
 .unit-b .i{width:16px;height:16px;flex:none;color:var(--muted)}
-.pctl.split{flex-direction:column;align-items:flex-start;gap:8px}
-.spl{display:flex;align-items:center;gap:8px}
+/* Full cases and loose units side by side, each with its unit above; they stack on a very narrow screen. */
+.pctl.split{flex-direction:row;flex-wrap:wrap;align-items:flex-start;gap:8px 12px}
+.spl{display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.split .step{width:44px;height:48px}
+.split .qty{width:56px}
 .band-row{display:flex;align-items:center;background:var(--band);border-radius:6px 6px 0 0}
 .band-row .band{flex:1;min-width:0;background:none;text-align:left;padding-left:14px}
 .band-acts{display:flex;gap:2px;padding-right:2px}
@@ -464,10 +467,36 @@ details.more>.hint{background:var(--surface);border:1px solid var(--line);border
 .mini b{font-family:var(--f-display);font-weight:800;color:var(--band-text)}
 .mini.ghost{border-style:solid;border-color:transparent;color:var(--muted)}
 .seen{grid-column:1/-1;color:var(--muted);font-size:13px}
-.lflag{display:flex;align-items:center;gap:10px;margin-top:10px}
+.lflag{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-top:10px}
 .lflag .chip{min-height:44px;padding:8px 16px}
 .lflag-n{color:var(--muted);font-size:13.5px}
 .lflag-n:empty{display:none}
+.lflag-q:empty{display:none}
+.ordb{display:inline-flex;align-items:center;gap:6px;font-weight:700}
+.ordb .i{display:none;width:18px;height:18px}
+.chip.ordb[aria-pressed="true"]{background:var(--marker);border-color:var(--marker);color:var(--bg)}
+.ordb[aria-pressed="true"] .i{display:inline-block}
+.line.flagged .lflag{background:var(--marker-soft);border-radius:12px;padding:6px 8px;margin-inline:-8px}
+.olabel{font-size:13px;font-weight:700;color:var(--ink)}
+.lflag .oqty .step{width:46px;height:46px}
+.lflag .oqty .qty{width:56px;font-size:21px}
+/* Count: room tabs, how-often groups, and what's on hand under each line */
+.seg-c.rooms{margin-bottom:6px}
+.room-note{margin:0 0 12px}
+.fgroup{display:grid;gap:12px}
+.fg-h{margin:4px 0 -2px;font-family:var(--f-display);font-weight:700;font-size:19px;letter-spacing:.06em;text-transform:uppercase;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px}
+.fg-n{font-family:var(--f-body);font-weight:400;font-size:13.5px;letter-spacing:0;text-transform:none;color:var(--muted)}
+.lamt{display:grid;gap:2px;margin-top:10px;padding-top:8px;border-top:1px solid var(--line);font-size:14px;line-height:1.4;color:var(--muted)}
+.lamt .la-here{color:var(--ink);font-weight:600}
+.lamt .la-sum{color:var(--ink);font-weight:700}
+.tot,.troom{display:grid;gap:4px;margin:0;font-size:14.5px;line-height:1.4}
+.tot{margin-top:10px}
+.tot>div,.troom>div{display:grid;grid-template-columns:5.5em minmax(0,1fr);gap:8px}
+.tot dt{color:var(--muted)} .tot dd,.troom dd{margin:0}
+.tot .tsum{border-top:1px solid var(--line);padding-top:6px;font-weight:700} .tot .tsum dt{color:var(--ink)}
+.troom{margin-bottom:12px;padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.troom dt{font-weight:700} .troom dd{color:var(--muted)}
+.csave{margin-top:8px}
 @media (max-width:540px){ .line.multi .prod{grid-template-columns:minmax(0,1fr)} }
 .sub-title{margin:18px 0 8px;font-family:var(--f-display);font-weight:700;font-size:19px;letter-spacing:.06em;text-transform:uppercase;display:flex;align-items:center;gap:8px}
 .sub-title .n{background:var(--none-soft);color:var(--ink)}

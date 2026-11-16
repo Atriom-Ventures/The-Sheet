@@ -95,7 +95,7 @@ if (!MODE) {
   const go = async (h) => { location.hash = h; await new Promise((r) => setTimeout(r, 5)); };
   const P = S.plans.local, v0 = P.versions[0], M = S.menu.local, inv = S.inv.local;
 
-  const routes = ['#now', '#book', '#book/cards', '#book/sheet', '#book/day', '#count', '#count/order', '#count/history', '#count/items', '#lead', '#lead/floor', '#lead/msgs', '#lead/train', '#lead/wins', '#lead/printed', '#more', '#quick', '#book/maps', '#book/map/' + v0.id + '/' + v0.rooms[0].id, '#book/allergens', '#book/allergens/preview'];
+  const routes = ['#now', '#book', '#book/cards', '#book/sheet', '#book/day', '#count', '#count/totals', '#count/order', '#count/history', '#count/items', '#lead', '#lead/floor', '#lead/msgs', '#lead/train', '#lead/wins', '#lead/printed', '#more', '#quick', '#book/maps', '#book/map/' + v0.id + '/' + v0.rooms[0].id, '#book/allergens', '#book/allergens/preview'];
   (B().lists || []).forEach((l) => routes.push('#book/list/' + l.id));
   for (const h of routes) { await go(h); view(h); }
   for (const h of routes.filter((x) => x.startsWith('#book'))) { await go(h); app.ui.editing = true; app.renderView(); view(h + ' (editing)'); }
@@ -116,6 +116,7 @@ if (!MODE) {
   await go('#count/items');
   inv.lines.forEach((l) => { try { app.acts['item-open'](fake({ id: l.id })); } catch (e) { /* soaked id */ } app.renderView(); view('items, a line open'); });
   await go('#count');
+  app.acts['count-room'](fake({ id: 'kitchen' })); app.acts['count-new'](fake({})); view('count, second room'); app.acts['count-new-no'](fake({})); app.acts['count-room'](fake({ id: 'servery' }));
   inv.lines.forEach((l) => sheet('inv-how', { line: l.id })); inv.cats.forEach((c) => sheet('cat-rename', { id: c.id }));
   (B().cards || []).forEach((c) => { sheet('open-card', { id: c.id }); sheet('card-edit', { id: c.id }); });
   (S.state.local.follow || []).forEach((f) => { sheet('ask-edit', { id: f.id }); sheet('ask-answer', { id: f.id }); });

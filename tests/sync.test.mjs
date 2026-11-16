@@ -273,6 +273,7 @@ check(L.sy.canWrite('counts') === false && L.sy.canWrite('inv') === false, 'app 
 const lOrder = L.count.render({ sub: 'order' });
 check(/View only/.test(lOrder) && !/data-act="count-save"/.test(lOrder) && !/data-act="order-place"/.test(lOrder) && !/Mark placed|Mark received/.test(lOrder), 'Order tab: view-only note, no Save count, no Order placed, no order buttons');
 check(!/data-act="inv-flag"/.test(L.count.render({ sub: 'count' })), 'no Order buttons on the lines');
+check(!/data-act="count-save"|data-act="ord-inc"|data-oline=/.test(L.count.render({ sub: 'count' })) && !/data-act="inv-flag"/.test(L.count.render({ sub: 'totals' })), 'Count: no Save button or order steppers; Totals: no Order buttons');
 L.act('inv-flag', { line: L1.id });
 check(!L.S.inv.local.lines.some((l) => l.flag), 'flagging refuses');
 check(!/data-act="item-add"/.test(L.count.render({ sub: 'items' })) && !/hist-del/.test(L.count.render({ sub: 'history' })), 'no add-line or delete buttons');

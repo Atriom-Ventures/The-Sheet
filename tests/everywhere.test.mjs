@@ -114,7 +114,8 @@ if (!MODE) {
   c3.setStamp(M, 'Chef' + MARK, '2026-01-10', 'AA' + MARK); app.renderView(); view('card, kitchen checked'); scan('card pages, checked', pages.allPages(M)); sheet('c3-stamp');
   M.rows[0].name += 'x'; M.checkedBefore = { name: 'Chef' + MARK, date: '2026-01-10' + MARK }; app.renderView(); view('card, changed since the check');
   await go('#count/items');
-  inv.lines.forEach((l) => { try { app.acts['item-open'](fake({ id: l.id })); } catch (e) { /* soaked id */ } app.renderView(); view('items, a line open'); });
+  for (const s of ['often', 'az', 'order']) { app.acts['item-sort'](fake({ id: s })); app.renderView(); view('items, sorted ' + s); }
+  inv.lines.forEach((l) => { sheet('item-open', { id: l.id }); sheet('inv-how', { line: l.id }); }); // a line's panel, and its size tapped
   await go('#count');
   app.acts['count-room'](fake({ id: 'kitchen' })); app.acts['count-new'](fake({})); view('count, second room'); app.acts['count-new-no'](fake({})); app.acts['count-room'](fake({ id: 'servery' }));
   inv.lines.forEach((l) => sheet('inv-how', { line: l.id })); inv.cats.forEach((c) => sheet('cat-rename', { id: c.id }));

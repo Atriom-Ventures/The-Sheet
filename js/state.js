@@ -11,7 +11,7 @@
 //     plans  -> floorplans.json floor plans, as whole-floor versions
 //     menu   -> card3.json      the allergen card: menu rows and the kitchen's check
 // Phone only, never synced:
-//   count (count in progress), day (today's ticks), shift (shift notes), floor (who's on, breaks),
+//   count (counts in progress, one per place), day (today's ticks), shift (shift notes), floor (who's on, breaks),
 //   trainees, priv (staffing plan and private cards), msgs (message drafts), settings (incl. GitHub key)
 
 import * as db from './db.js';
@@ -45,7 +45,9 @@ const defaults = () => ({
   conflicts: []
 });
 
-export function newCount() { return { id: uid('c'), started: new Date().toISOString(), counts: {}, orders: {} }; }
+/* A count in progress. `place` says which place it's for (none: the first; see stock.js). The other
+   place's count in progress, if there is one, rides along in `parked`. */
+export function newCount(place) { const c = { id: uid('c'), started: new Date().toISOString(), counts: {}, orders: {} }; if (place) c.place = place; return c; }
 
 export const S = defaults();
 let listeners = [];

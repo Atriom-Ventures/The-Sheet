@@ -464,6 +464,10 @@ details.more>.hint{background:var(--surface);border:1px solid var(--line);border
 .mini b{font-family:var(--f-display);font-weight:800;color:var(--band-text)}
 .mini.ghost{border-style:solid;border-color:transparent;color:var(--muted)}
 .seen{grid-column:1/-1;color:var(--muted);font-size:13px}
+.lflag{display:flex;align-items:center;gap:10px;margin-top:10px}
+.lflag .chip{min-height:44px;padding:8px 16px}
+.lflag-n{color:var(--muted);font-size:13.5px}
+.lflag-n:empty{display:none}
 @media (max-width:540px){ .line.multi .prod{grid-template-columns:minmax(0,1fr)} }
 .sub-title{margin:18px 0 8px;font-family:var(--f-display);font-weight:700;font-size:19px;letter-spacing:.06em;text-transform:uppercase;display:flex;align-items:center;gap:8px}
 .sub-title .n{background:var(--none-soft);color:var(--ink)}

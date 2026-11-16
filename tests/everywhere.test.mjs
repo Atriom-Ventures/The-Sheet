@@ -119,6 +119,9 @@ if (!MODE) {
   await go('#count');
   app.acts['count-room'](fake({ id: 'kitchen' })); app.acts['count-new'](fake({})); view('count, second room'); app.acts['count-new-no'](fake({})); app.acts['count-room'](fake({ id: 'servery' }));
   inv.lines.forEach((l) => sheet('inv-how', { line: l.id })); inv.cats.forEach((c) => sheet('cat-rename', { id: c.id }));
+  // The Order tab after its message was copied and the shared list changed: amounts differ, and a line is gone.
+  S.msgs['order-sent'] = { __daily: true, __day: 'x' + MARK, lines: Object.assign(Object.fromEntries(inv.lines.map((l) => [l.id, [99, 'box' + MARK, 'Was' + MARK]])), { ['gone' + MARK]: [1, 'box' + MARK, 'Gone' + MARK] }) };
+  await go('#count/order'); view('order, changed since the message was copied'); delete S.msgs['order-sent'];
   (B().cards || []).forEach((c) => { sheet('open-card', { id: c.id }); sheet('card-edit', { id: c.id }); });
   (S.state.local.follow || []).forEach((f) => { sheet('ask-edit', { id: f.id }); sheet('ask-answer', { id: f.id }); });
   (S.floor.people || []).forEach((p) => sheet('fp-edit', { id: p.id }));

@@ -3,7 +3,7 @@
 
 import { app } from '../app.js';
 import { S, I, C, save, edit, hasInv, signName, whoAmI } from '../state.js';
-import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, PLACES, placeName, placeOf, FREQS, freqOf, freqName, roomNow, setRoom, inProgress, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, orderList, placeOrder, saveCount, stampLine, setFreq } from '../stock.js';
+import { UNITS, unitWord, fmtQty, perCaseOf, smallUnit, r6, factor, partsOf, fromParts, splitParts, fromSplit, fmtSplit, fmtHave, prefProduct, byName, PLACES, placeName, placeOf, FREQS, freqOf, freqName, roomNow, setRoom, inProgress, allInProgress, freshCount, forgetProduct, isOrder, savedVal, totals, flagOf, setFlag, setFlagAmount, dropFlag, orderList, placeOrder, saveCount, stampLine, setFreq } from '../stock.js';
 import { autoSync, canWrite, perm, connOf } from '../sync.js';
 import { setAtPath, markGone } from '../merge.js';
 import { esc, fmtNum, parseQty, round2, fmtShort, dateOf, uid, slug, copyText, shareText, todayKey, $, cssEsc, debounce, ago, daysSince, clone } from '../util.js';
@@ -492,6 +492,40 @@ function refreshFlag(lineId, focusBtn) {
   refreshTally();
 }
 
+/* ---------- the message that went out ----------
+   The order list is shared, so it can change after the message has gone to team chat: the other phone
+   flags a line, it syncs in while this phone is in the chat app, and Order placed would then file (and
+   clear) a line nobody was asked for. Copy and Share note what the list held, on this phone only and
+   until tomorrow; the Order tab says when the list no longer matches it. Order placed still files what
+   is on screen. */
+const SENT = 'order-sent';
+function noteSent() {
+  S.msgs = S.msgs || {};
+  S.msgs[SENT] = { __daily: true, __day: todayKey(), lines: Object.fromEntries(orderList().map((o) => [o.l.id, [o.n, o.unit, o.l.name]])) };
+  save('msgs');
+}
+function forgetSent() { if (S.msgs && S.msgs[SENT]) { delete S.msgs[SENT]; save('msgs'); } }
+/* What changed on the list since the message was last copied or shared, in words. '' when nothing did, or nothing was copied. */
+function sentDiff(list) {
+  const s = S.msgs && S.msgs[SENT], was = s && s.lines;
+  if (!was || typeof was !== 'object') return '';
+  const bits = [], now = new Set(list.map((o) => o.l.id));
+  // None of what was copied is still on the list: that order is over (filed on the other phone, or dropped), and this is a new list.
+  if (!Object.keys(was).some((id) => now.has(id))) return '';
+  for (const o of list) {
+    const w = was[o.l.id];
+    if (!Array.isArray(w)) bits.push(o.l.name + ' added' + (o.by ? ' by ' + o.by : ''));
+    else if (w[0] !== o.n || w[1] !== o.unit) bits.push(o.l.name + ' is now ' + fmtQty(o.n, o.unit));
+  }
+  for (const id of Object.keys(was)) if (!now.has(id)) bits.push(String((Array.isArray(was[id]) && was[id][2]) || 'A line') + ' taken off');
+  return bits.join('; ');
+}
+function changedHTML(list) {
+  const d = sentDiff(list);
+  return d ? '<p class="note warn-t">' + esc('Changed since the message was copied: ' + d + '. Copy it again before it goes out, so what’s sent matches what’s filed.') + '</p>' : '';
+}
+function refreshChanged() { const el = document.getElementById('ord-changed'); if (el) el.innerHTML = changedHTML(orderList()); }
+
 /* ---------- order tab ----------
    The list is the flagged lines, shared by everyone who orders. Nothing lands here on its own. Each
    line shows what's on hand in both rooms, which product to order, who flagged it, a Remove button
@@ -519,6 +553,7 @@ function orderTab() {
   h += '<p class="hint">' + esc(ro() ? 'Flagged by hand, shared by everyone who orders.' : 'Flagged by hand, on Count or Items. Everyone who orders sees the same list.') + '</p>';
   h += '<ul class="olist">' + list.map((o) => orderRow(o, have[o.l.id])).join('') + '</ul>';
   h += '<h2 class="sub-title">Message for ' + esc(I().messaging || 'team chat') + '</h2><pre class="chit" id="order-text">' + esc(orderText(list)) + '</pre>';
+  h += '<div id="ord-changed" class="ord-changed" role="status">' + changedHTML(list) + '</div>';
   h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button></div>';
   if (!ro()) h += '<section class="oplace" aria-labelledby="oplace-h"><h2 class="sub-title" id="oplace-h">Once it’s ordered</h2><div class="row-actions"><button class="btn" data-act="order-place">' + ICON.check + ' Order placed</button></div>' +
     '<p class="hint">Tap it twice. It files the order in History, where everyone who orders can mark it received, and clears this list.</p></section>';
@@ -530,6 +565,7 @@ function showOrderQty(lineId, force) {
   const inp = document.getElementById('oq-' + lineId); if (inp && f && (force || document.activeElement !== inp)) inp.value = fmtNum(f.n);
   const u = document.getElementById('OU-' + lineId); if (u && f) u.textContent = unitWord(f.unit, f.n);
   const t = $('#order-text'); if (t) t.textContent = orderText(orderList());
+  refreshChanged();
   refreshRow(lineId);
 }
 const NO_FLAG = 'View only: changing the order list needs write access.';
@@ -875,14 +911,15 @@ export const acts = {
   'ord-remove': (el) => { if (ro()) { toast(NO_FLAG); return; } const l = lines().find((x) => x.id === el.dataset.line); if (l && flagOf(l)) unflag(l.id); },
   'ord-inc': (el) => stepFlag(el.dataset.line, 1),
   'ord-dec': (el) => stepFlag(el.dataset.line, -1),
-  'ord-copy': async () => { if (await copyText(orderText(orderList()))) toast('Order copied.'); },
-  'ord-share': async () => { const r = await shareText(orderText(orderList()), 'Order'); if (r === 'copied') toast('Order copied.'); },
+  'ord-copy': async () => { if (await copyText(orderText(orderList()))) { noteSent(); refreshChanged(); toast('Order copied.'); } },
+  'ord-share': async () => { const r = await shareText(orderText(orderList()), 'Order'); if (r === 'copied' || r === 'shared') { noteSent(); refreshChanged(); } if (r === 'copied') toast('Order copied.'); },
   // Order placed: files the order in History for everyone and clears the flags. Two taps: it empties a shared list.
   'order-place': (el) => {
     if (ro()) { toast('View only: placing an order needs write access. Copy the order instead.'); return; }
     if (!orderList().length) { toast('Nothing is flagged to order.'); return; }
-    if (!armed(el, 'Tap again: order placed')) return;
+    if (!armed(el, sentDiff(orderList()) ? 'Changed since copied. Tap again to file it as shown' : 'Tap again: order placed')) return;
     placeOrder(orderText(orderList()));
+    forgetSent();
     autoSync('save', 800);
     toast('Order filed. The list is clear.'); app.go('#count/history');
   },
@@ -970,7 +1007,10 @@ function saveField(el) {
     if (k === 'step') v = +v;
     if (k === 'inner' && UNITS.indexOf(v) < 0) return;
     if (k === 'name' && !v.trim()) return;
-    editLine(id, (l) => { l[k] = v; });
+    // On or off the order sheet: the line's flag goes with the change (see dropFlag).
+    const was = lines().find((x) => x.id === id), offList = k === 'state' && was && !!flagOf(was) && v !== 'active';
+    editLine(id, (l) => { if (k === 'state' && (l.state === 'active') !== (v === 'active')) dropFlag(l); l[k] = v; });
+    if (offList) toast('Off the order sheet, so it’s off the order list too.');
     if (k === 'cat' || k === 'state') { app.renderView(); redrawPanel(); }
     else if (k === 'inner' || k === 'step') afterUnitEdit(id);
     else { refreshRow(id); if (k === 'name' && panelLine === id) setSheetTitle(v); }

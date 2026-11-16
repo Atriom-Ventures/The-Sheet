@@ -627,4 +627,77 @@ console.log('\n13. The Order tab, History and the printed count sheet');
   check(R.stock.orderList().length === 1, 'view only: Remove does nothing');
 }
 
+console.log('\n14. From the cold review: a line read whole, a flag that leaves with its line, a plain number saved as one');
+{
+  // A line with two products: the saved count has 3 + 4. One is counted again, as 1.
+  const B2 = await bare('Blend'), K = B2.stock;
+  const step = (pid, n) => { for (let i = 0; i < n; i++) B2.act('inv-step', { pid, d: '1' }); };
+  step('p-box-a', 3); step('p-box-b', 4); B2.act('count-save');
+  check(K.totals().lines['ln-boxes'].servery.v === 7, '(setup: the saved count has 3 + 4 = 7 sleeves of boxes)');
+  step('p-box-a', 1);
+  const live = K.totals({ live: 'servery' }).lines['ln-boxes'];
+  check(live.servery.v === 1 && live.servery.n === 1 && !live.servery.counted && live.servery.live === true && live.sum.v === 1, 'one product counted again: the line reads 1, with 1 of 2 products counted, not 1 plus the other product’s old 4 (got ' + live.servery.v + ')');
+  const shown = B2.count.render({ sub: 'count' }), at = shown.indexOf('id="LA-ln-boxes"');
+  check(/Servery: 1 sleeve \(1 of 2 products\)/.test(unesc(shown.slice(at, at + 400))), 'the room tab says so: 1 sleeve (1 of 2 products)');
+  check(K.totals({ live: 'servery' }).lines['ln-cups'].servery.v === null && K.totals().lines['ln-boxes'].servery.v === 7, 'a line not counted again still shows its last saved count, and the saved totals aren’t touched');
+  B2.act('count-save');
+  check(K.totals().lines['ln-boxes'].servery.v === 1, '…and once saved it reads the same 1 that was on screen');
+
+  // A flagged line is crossed off the sheet, an order goes in without it, and the line comes back.
+  const F2 = await bare('OffSheet'), KF = F2.stock, tea = () => F2.st.I().lines.find((l) => l.id === 'ln-tea');
+  const setState = (v) => F2.count.onInput({ dataset: { ie: 'state', line: 'ln-tea' }, tagName: 'SELECT', value: v, classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {} }, { type: 'change' });
+  F2.act('inv-flag', { line: 'ln-tea' }); F2.act('inv-flag', { line: 'ln-coffee' });
+  setState('disc');
+  check(!tea().flag && !!tea().cleared && JSON.stringify(KF.orderList().map((o) => o.l.id)) === '["ln-coffee"]', 'crossed off the sheet while flagged: its flag is cleared, not just hidden');
+  F2.act('order-place', { armed: '1' });
+  setState('active');
+  check(!KF.flagOf(tea()) && KF.orderList().length === 0, 'back on the sheet after an order went in without it: it isn’t on the order list');
+  F2.st.edit('inv', (inv) => { const l = inv.lines.find((x) => x.id === 'ln-tea'); l.state = 'ask'; l.flag = { n: 4, unit: 'box', at: new Date(Date.now() + 5000).toISOString(), by: 'AA' }; }); // flagged on another phone as this one took it off the sheet
+  setState('active');
+  check(!KF.flagOf(tea()) && !tea().flag, 'a flag that arrived while the line was off the sheet doesn’t come back with it either');
+  F2.act('inv-flag', { line: 'ln-tea' });
+  check(!!KF.flagOf(tea()), '…and it can be flagged again by hand straight away');
+  setState('active'); F2.count.onInput({ dataset: { ie: 'note', line: 'ln-tea' }, tagName: 'SELECT', value: 'top shelf', classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {} }, { type: 'change' });
+  check(!!KF.flagOf(tea()), 'any other change to a line leaves its flag alone');
+
+  // 25 loose sleeves typed in before the line had a case size. The case size is added, then corrected after the save.
+  const N2 = await bare('PlainNumber'), KN = N2.stock, lids = (fn) => N2.st.edit('inv', (inv) => fn(inv.lines.find((l) => l.id === 'ln-lids').products[0]));
+  for (let i = 0; i < 25; i++) N2.act('inv-step', { pid: 'p-lids', d: '1' });
+  lids((p) => { p.perCase = 10; });
+  N2.act('inv-split', { pid: 'p-cups', part: 'c', d: '1' }); N2.act('inv-split', { pid: 'p-cups', part: 'l', d: '1' }); // cups: 1 case + 1 sleeve, at 20 a case
+  N2.act('count-save');
+  const sv = N2.st.C().history.slice(-1)[0];
+  check(sv.counts['p-lids'] === 25 && !('p-lids' in sv.per) && sv.per['p-cups'] === 20, 'a number entered before the line had a case size is saved with no per-case number; one counted as cases + loose keeps its own');
+  lids((p) => { p.perCase = 12; });
+  N2.st.edit('inv', (inv) => { inv.lines.find((l) => l.id === 'ln-cups').products[0].perCase = 24; });
+  const tn = KN.totals().lines;
+  check(tn['ln-lids'].servery.v === 25, 'so correcting the case size afterwards leaves 25 sleeves at 25, not 2 cases + 5 worked out again as 29 (got ' + tn['ln-lids'].servery.v + ')');
+  check(tn['ln-cups'].servery.v === 25, '…while 1 case + 1 sleeve still follows the corrected case size: 25 sleeves at 24 a case');
+
+  // The message is copied, then the shared list changes (the other phone flags a line and it syncs in).
+  const M2 = await bare('Sent'), KM = M2.stock, ordTab = () => M2.count.render({ sub: 'order' });
+  const warn = () => unesc((/<div id="ord-changed" class="ord-changed" role="status">(?:<p class="note warn-t">([^<]*)<\/p>)?<\/div>/.exec(ordTab()) || [])[1] || '');
+  globalThis.navigator.clipboard = { writeText: async () => {} };
+  M2.act('inv-flag', { line: 'ln-tea' }); M2.act('inv-flag', { line: 'ln-coffee' }); M2.act('ord-inc', { line: 'ln-tea' });
+  check(warn() === '' && /id="ord-changed"/.test(ordTab()), 'nothing copied yet: the Order tab has nothing to warn about');
+  await M2.act('ord-copy');
+  check(warn() === '' && !!M2.S.msgs['order-sent'] && M2.S.msgs['order-sent'].__daily === true, 'Copy notes what the list held, on this phone, until tomorrow');
+  M2.st.edit('inv', (inv) => { inv.lines.find((l) => l.id === 'ln-napkins').flag = { n: 1, unit: 'case', at: new Date(Date.now() + 1000).toISOString(), by: 'AA' }; }); // synced in from the other phone
+  check(/^Changed since the message was copied: Napkins added by AA\. Copy it again/.test(warn()), 'a line the other phone added after the copy is called out above Copy: ' + warn());
+  M2.act('ord-inc', { line: 'ln-tea' }); M2.act('ord-remove', { line: 'ln-coffee' });
+  check(/Napkins added by AA; Tea, assorted is now 3 boxes; Coffee, regular taken off\./.test(warn()), '…and so are a changed amount and a line taken off: ' + warn());
+  const armedAs = []; const realPlace = { dataset: {}, classList: { add() {}, remove() {} }, getAttribute: () => null, setAttribute() {}, removeAttribute() {}, innerHTML: '', set textContent(v) { armedAs.push(v); } };
+  M2.count.acts['order-place'](realPlace);
+  check(/^Changed since copied/.test(armedAs[0] || '') && KM.orderList().length === 2, 'Order placed says so on its first tap, and files nothing yet: ' + armedAs[0]);
+  await M2.act('ord-copy');
+  check(warn() === '', 'copied again: the warning goes');
+  for (const o of KM.orderList()) KM.setFlag(o.l.id, false); // every copied line cleared, as when the other phone files the order
+  M2.act('inv-flag', { line: 'ln-soap' }); M2.act('inv-flag', { line: 'ln-cups' });
+  check(warn() === '' && !!M2.S.msgs['order-sent'] && KM.orderList().length === 2, 'a copied list that’s gone altogether (filed elsewhere, or dropped) isn’t held against a new one');
+  await M2.act('ord-copy');
+  M2.act('order-place', { armed: '1' });
+  check(!M2.S.msgs['order-sent'] && KM.orderList().length === 0, 'once the order is filed, what was copied is forgotten');
+  delete globalThis.navigator.clipboard;
+}
+
 T.done();

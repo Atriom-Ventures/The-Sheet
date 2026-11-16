@@ -694,4 +694,43 @@ console.log('\n25. The shared order list: flags, clashes, and a cleared flag sta
   check(same(lineIn(invGH(), 'ln-soap').flag, lineIn(F.S.inv.local, 'ln-soap').flag) && same(lineIn(E.S.inv.local, 'ln-soap').flag, lineIn(F.S.inv.local, 'ln-soap').flag), '…and both phones and GitHub end up the same');
 }
 
+console.log('\n26. From the cold review: two phones file the same order before syncing');
+{
+  const flag = (P, id) => P.stock.flagOf(lineIn(P.S.inv.local, id));
+  const twin = (P) => P.S.conflicts.filter((c) => c.key === 'counts' && /each filed an order/.test(c.note || ''));
+  const orders = (doc) => doc.history.filter((h) => h.kind === 'order');
+  E.S.conflicts = []; F.S.conflicts = [];
+  await E.sy.syncAll(); await F.sy.syncAll();
+  for (const o of E.stock.orderList()) E.stock.setFlag(o.l.id, false); // start from an empty list
+  E.act('inv-flag', { line: 'ln-lids' }); E.act('inv-flag', { line: 'ln-tea' });
+  await E.sy.syncAll(); await F.sy.syncAll();
+  const before = orders(readJSON(SHARED, 'counts.json')).length;
+  check(F.stock.orderList().map((o) => o.l.id).sort().join() === 'ln-lids,ln-tea', '(setup: lids and tea, and nothing else, are on both phones’ order list)');
+  GH.offline = true;
+  E.act('order-place', { armed: '1' }); await wait(20); F.act('order-place', { armed: '1' });
+  await wait(1000); GH.offline = false;
+  await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+  check(orders(readJSON(SHARED, 'counts.json')).length === before + 2 && orders(E.S.counts.local).length === before + 2, 'both orders are kept, on GitHub and on both phones: each person did say one went in');
+  const note = twin(F)[0] || {};
+  check(twin(F).length === 1 && r.review >= 1 && note.review === true && /You and EE each filed an order/.test(note.note) && /Cup lids/.test(note.note) && /Tea/.test(note.note), 'the phone that syncs second is told both orders hold the same lines: ' + (note.note || 'no note'));
+  const fTab = F.count.render({ sub: 'count' });
+  check(/Order from [^<]*<\/div><div class="clash-v">You and EE each filed an order/.test(fTab) && /data-act="clash-mine"/.test(fTab), '…on the Count tab, with an OK button');
+  check(!flag(E, 'ln-lids') && !flag(F, 'ln-tea') && !lineIn(readJSON(SHARED, 'inventory.json'), 'ln-tea').flag, 'the flags stay cleared everywhere');
+  F.act('clash-mine', { id: note.id });
+  // Orders with different lines, or a day apart, are ordinary: no note.
+  E.act('inv-flag', { line: 'ln-coffee' }); F.act('inv-flag', { line: 'ln-soap' });
+  GH.offline = true;
+  E.act('order-place', { armed: '1' }); F.act('order-place', { armed: '1' });
+  await wait(1000); GH.offline = false;
+  await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+  check(twin(F).length === 0 && twin(E).length === 0, 'two orders with no line in common: no note');
+  E.act('inv-flag', { line: 'ln-decaf' }); await E.sy.syncAll(); await F.sy.syncAll();
+  GH.offline = true;
+  E.act('order-place', { armed: '1' }); F.act('order-place', { armed: '1' });
+  F.st.edit('counts', (c) => { const o = c.history[c.history.length - 1]; o.savedAt = new Date(Date.now() - 3 * 864e5).toISOString(); }); // this phone was offline for days
+  await wait(1000); GH.offline = false;
+  await E.sy.syncAll(); r = await F.sy.syncAll(); await E.sy.syncAll();
+  check(twin(F).length === 0 && twin(E).length === 0, 'the same line ordered again days apart: no note');
+}
+
 T.done();

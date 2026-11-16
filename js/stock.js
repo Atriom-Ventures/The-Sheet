@@ -155,8 +155,9 @@ const parts = (line, v) => { const n = line.products.length === 1 ? perCaseOf(li
      cases, loose   v as full cases and loose units, when the line is one product with a per-case number
      live     true when the number came from this phone's count in progress
    lines[lineId].sum: { v, cases, loose } across both places; v is null when neither counted it.
-   opts.live: a place id, or true for both. Lines counted in this phone's count in progress for that
-   place use that number in place of the saved one. Left out: saved counts only. */
+   opts.live: a place id, or true for both. A line counted in this phone's count in progress for that
+   place is read from it in place of the saved count (the whole line: never part one, part the other).
+   Left out: saved counts only. */
 export function totals(opts) {
   const live = opts && opts.live, saved = newestCounts(), rooms = {}, lines = {};
   for (const pl of PLACE_IDS) { const h = saved[pl]; rooms[pl] = h ? { id: h.id, date: h.date, savedAt: h.savedAt, by: h.by || '' } : null; }
@@ -164,10 +165,14 @@ export function totals(opts) {
     const row = {}; let sum = null;
     for (const pl of PLACE_IDS) {
       const h = saved[pl], cnt = live === true || live === pl ? inProgress(pl) : null;
-      let v = 0, n = 0, stale = false, isLive = false;
+      // A line this phone has started counting is read from the count in progress alone, the way it will
+      // read once that count is saved (a saved count replaces the older one whole). Its products not
+      // reached yet are not counted: they never borrow a number from the last saved count.
+      const isLive = !!(cnt && cnt.counts && line.products.some((p) => cnt.counts[p.id] != null));
+      let v = 0, n = 0, stale = false;
       for (const p of line.products) {
         let x;
-        if (cnt && cnt.counts && cnt.counts[p.id] != null) { x = liveVal(cnt, line, p); isLive = true; }
+        if (isLive) x = cnt.counts[p.id] != null ? liveVal(cnt, line, p) : undefined;
         else x = h ? savedVal(h, line, p) : undefined;
         if (x === undefined) continue;
         if (x === null) { stale = true; continue; }
@@ -215,6 +220,10 @@ function timeAfter(cleared) {
   return Number.isFinite(t) ? new Date(t + 1).toISOString() : now;
 }
 const clearFlag = (l, when) => { l.cleared = later(when, stampOf(l.flag && l.flag.at)); delete l.flag; };
+/* A line going off the order sheet, or coming back onto it, starts with no flag. A flag left on it would
+   be hidden while it's off the sheet, miss every order placed meanwhile, and turn up again when the
+   line comes back, maybe months later. Call it inside the edit that changes the line's status. */
+export function dropFlag(l) { if (isObj(l) && isObj(l.flag)) clearFlag(l, new Date().toISOString()); }
 /* Put a line on the order list (amount 1), or take it off. False if nothing changed. */
 export function setFlag(lineId, on) {
   const l = lineById(lineId);
@@ -269,7 +278,14 @@ export function saveCount(text) {
   const cnt = S.count;
   if (!Object.keys(cnt.counts || {}).length) return null;
   const units = {}, per = {};
-  for (const l of I().lines) for (const p of l.products) if (cnt.counts[p.id] != null) { units[p.id] = l.unit; const n = perCaseOf(p); if (n) per[p.id] = n; }
+  for (const l of I().lines) for (const p of l.products) if (cnt.counts[p.id] != null) {
+    units[p.id] = l.unit;
+    // The per-case number goes with a count made as full cases plus loose units: it's what lets a corrected
+    // case size add them up again (savedVal). A plain number, entered before the product had a case
+    // size, has no cases to keep: it must stay that number.
+    const n = perCaseOf(p), rec = cnt.per && cnt.per[p.id], plain = isObj(rec) && !(rec.n > 0);
+    if (n && !plain) per[p.id] = n;
+  }
   const entry = { id: uid('h'), date: todayKey(), savedAt: new Date().toISOString(), by: whoAmI(), place: roomNow(), counts: Object.assign({}, cnt.counts), units, per, orderCount: 0, text: text || '', updated: todayKey() };
   edit('counts', (c) => { c.history = (c.history || []).concat([entry]); });
   return entry;

@@ -242,6 +242,8 @@ input.temp.hot{border-color:var(--stop);color:var(--stop);background:var(--stop-
 .tmpl-b{color:var(--muted);font-size:14.5px;line-height:1.4}
 .preview{margin-top:18px}
 .chit{margin:0;font-family:var(--f-mono);font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--sunk);border:1.5px dashed var(--line-strong);border-radius:6px;padding:14px;color:var(--ink)}
+/* Order tab: the list changed after its message was copied. Sits between the message and Copy. */
+.ord-changed .note{margin:10px 0 0}
 
 /* forms */
 .form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 10px}

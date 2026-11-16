@@ -382,6 +382,9 @@ textarea{resize:vertical;line-height:1.4}
 .hdate{font-family:var(--f-display);font-weight:700;font-size:19px;letter-spacing:.02em;text-transform:uppercase}
 .hby{color:var(--muted);font-size:14px}
 .hsum{grid-column:1/-1;color:var(--muted);font-size:13.5px}
+.hsum .hroom{color:var(--ink)}
+.htags{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:0 6px}
+.o-room{background:transparent;color:var(--band-text);border:1px solid var(--band-text)}
 .hbody{padding:0 14px 14px;display:grid;gap:10px}
 .todo-list{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-top:12px}
 .todo-list summary{cursor:pointer;font-weight:700}
@@ -495,13 +498,20 @@ details.more>.hint{background:var(--surface);border:1px solid var(--line);border
 .sub-title{margin:18px 0 8px;font-family:var(--f-display);font-weight:700;font-size:19px;letter-spacing:.06em;text-transform:uppercase;display:flex;align-items:center;gap:8px}
 .sub-title .n{background:var(--none-soft);color:var(--ink)}
 .sub-title.go .n{background:var(--marker);color:var(--bg)}
-.olist{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.orow{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:6px 10px;align-items:center;padding:12px 14px 12px 10px;border-top:1px solid var(--line)}
+/* The Order tab: one row per flagged line, its name and Remove on top, its amount under them. */
+.olist{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.orow{display:grid;gap:10px;padding:12px 14px;border-top:1px solid var(--line)}
 .orow:first-child{border-top:0}
-.otick{width:15px;height:3px;border-radius:2px;background:var(--marker);transform:rotate(-9deg)}
-.orow.skip .otick{background:var(--line-strong)} .orow.skip .lname{color:var(--muted)}
+.orow-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.oinfo{min-width:0}
+.orm{flex-shrink:0;min-height:44px;padding:8px 14px;font-size:14.5px}
+.orow .oqty .step{width:46px;height:46px}
+.orow .oqty .qty{width:56px;font-size:21px}
 .oqty .qty{color:var(--marker)}
-@media (max-width:540px){ .orow{grid-template-columns:16px minmax(0,1fr)} .orow .oqty{grid-column:2} }
+.ord-empty{display:grid;gap:10px}
+.ord-empty p{margin:0}
+.ord-empty .btn.small{min-height:44px}
+.oplace .sub-title{margin-top:22px}
 .srow2{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:10px 14px;border-top:1px solid var(--line)}
 .srow2:first-child{border-top:0}
 .srow2 .v{font-family:var(--f-display);font-weight:700;white-space:nowrap;text-align:right}
@@ -676,12 +686,12 @@ body.quick .view{padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px))}
   .pv-asg-n{border-bottom:.8pt solid #000!important}
   .pv-band{background:#2A5FA8;color:#fff;font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:11pt;text-align:center;padding:2pt;margin:10pt 0 0;break-after:avoid}
   .pv-count{width:100%;border-collapse:collapse;font-size:10pt;table-layout:fixed}
-  .pv-count th:first-child{width:52%}
-  .pv-count th:nth-child(2){width:16%}
+  .pv-count th:first-child{width:46%}
   .pv-count th{text-align:left;font-size:8.5pt;color:#333;border-bottom:.8pt solid #000;padding:3pt 4pt}
   .pv-count td{border-bottom:.6pt solid #BFC8C4;padding:5pt 4pt}
-  .pv-count td:nth-child(3),.pv-count td:nth-child(4){width:.8in;border-left:.6pt solid #BFC8C4}
+  .pv-count td+td,.pv-count th+th{border-left:.6pt solid #BFC8C4}
   .pv-small{font-size:8.5pt;color:#555}
+  .pv-count .pv-small{display:block}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
 

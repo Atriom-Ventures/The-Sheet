@@ -122,17 +122,20 @@ function countText() {
     (by ? 'Counted by ' + by + ' · ' : '') + counted + ' of ' + activeLines().length + ' items counted', ''].concat(out).join('\n');
 }
 
-/* The order as a message for team chat. */
+/* The product to order on a line, in words: its name when the line has several, then brand and item #. */
+function orderProduct(l) {
+  const p = prefProduct(l); if (!p) return '';
+  return [l.products.length > 1 ? p.name : '', [p.brand, p.code].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+}
+/* The order as a message for team chat: what to order and which product. What's on hand stays on the
+   Order tab: it can include a count this phone hasn't saved, which the chat can't tell. */
 function orderText(list) {
-  const t = totals({ live: true }), by = signName() || whoAmI();
+  const by = signName() || whoAmI();
   const out = [(I().title || 'Inventory') + ' order · ' + new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })];
   if (by) out.push('From ' + by);
-  out.push('', 'ORDER');
+  out.push('');
   if (!list.length) out.push('Nothing is flagged to order.');
-  for (const o of list) {
-    const p = prefProduct(o.l), pd = p ? [p.brand, p.code].filter(Boolean).join(' ') : '', have = t.lines[o.l.id] && t.lines[o.l.id].sum.v;
-    out.push('• ' + o.l.name + ': ' + fmtQty(o.n, o.unit) + (pd ? ' (' + pd + ')' : '') + (have != null ? ' · have ' + fmtHave(o.l, have) : ''));
-  }
+  for (const o of list) { const pd = orderProduct(o.l); out.push('• ' + o.l.name + ': ' + fmtQty(o.n, o.unit) + (pd ? ' (' + pd + ')' : '')); }
   return out.join('\n');
 }
 
@@ -354,9 +357,9 @@ function totalsRows(line, t) {
 
 /* The Order button on a line: on means it's on the shared order list. When it's on, the amount to
    order shows beside it, with its own stepper (the same actions the Order tab uses). */
-function orderStepper(line, f) {
+function orderStepper(line, f, bare) {
   const id = esc(line.id);
-  return '<div class="pctl oqty"><span class="olabel" aria-hidden="true">To order</span><div class="stepper"><button class="step" data-act="ord-dec" data-line="' + id + '" aria-label="Order minus one, ' + esc(line.name) + '">−</button>' +
+  return '<div class="pctl oqty">' + (bare ? '' : '<span class="olabel" aria-hidden="true">To order</span>') + '<div class="stepper"><button class="step" data-act="ord-dec" data-line="' + id + '" aria-label="Order minus one, ' + esc(line.name) + '">−</button>' +
     '<input class="qty" id="oq-' + id + '" data-oline="' + id + '" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="' + esc(fmtNum(f.n)) + '" aria-label="Order amount for ' + esc(line.name) + '">' +
     '<button class="step" data-act="ord-inc" data-line="' + id + '" aria-label="Order plus one, ' + esc(line.name) + '">+</button></div><span class="unit" id="OU-' + id + '">' + esc(unitWord(f.unit, f.n)) + '</span></div>';
 }
@@ -490,23 +493,35 @@ function refreshFlag(lineId, focusBtn) {
 }
 
 /* ---------- order tab ----------
-   The list is the flagged lines, shared by everyone who orders. Nothing lands here on its own. */
-function orderRow(o, have) {
-  const p = prefProduct(o.l), pd = p ? [p.brand, p.code].filter(Boolean).join(' ') : '', id = esc(o.l.id);
-  const meta = [have != null ? esc('have ' + fmtHave(o.l, have)) : '', pd ? esc(pd) : (o.l.products.length > 1 ? '<em>pick which product</em>' : '')].filter(Boolean).join(' · ');
-  const qty = ro() ? '<span class="ltotal">' + esc(fmtQty(o.n, o.unit)) + '</span>'
-    : '<div class="pctl oqty"><div class="stepper"><button class="step" data-act="ord-dec" data-line="' + id + '" aria-label="Order minus one, ' + esc(o.l.name) + '">−</button><input class="qty" id="oq-' + id + '" data-oline="' + id + '" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="' + esc(fmtNum(o.n)) + '" aria-label="Order amount for ' + esc(o.l.name) + '"><button class="step" data-act="ord-inc" data-line="' + id + '" aria-label="Order plus one, ' + esc(o.l.name) + '">+</button></div><span class="unit">' + esc(unitWord(o.unit, 2)) + '</span></div>';
-  return '<div class="orow" id="O-' + id + '"><span class="otick" aria-hidden="true"></span><div class="oinfo"><div class="lname">' + esc(o.l.name) + '</div>' + (meta ? '<div class="lmeta">' + meta + '</div>' : '') + '</div>' + qty + '</div>';
+   The list is the flagged lines, shared by everyone who orders. Nothing lands here on its own. Each
+   line shows what's on hand in both rooms, which product to order, who flagged it, a Remove button
+   and its amount. Then the message for team chat, and Order placed. */
+function haveWords(l, row) {
+  if (!row) return '';
+  if (row.sum.v == null) return PLACES.some(([id]) => row[id].stale) ? 'count again' : 'not counted';
+  return 'have ' + fmtHave(l, row.sum.v) + (PLACES.some(([id]) => row[id].live) ? ' (counting now, not saved)' : '');
+}
+function orderRow(o, row) {
+  const id = esc(o.l.id), pd = orderProduct(o.l);
+  const meta = [esc(haveWords(o.l, row)), pd ? esc(pd) : (o.l.products.length > 1 ? '<em>pick which product</em>' : ''), o.by ? esc('flagged by ' + o.by) : ''].filter(Boolean).join(' · ');
+  const side = ro() ? '<span class="ltotal">' + esc(fmtQty(o.n, o.unit)) + '</span>'
+    : '<button class="btn orm" id="OR-' + id + '" data-act="ord-remove" data-line="' + id + '" aria-label="' + esc('Remove ' + o.l.name + ' from the order') + '">Remove</button>';
+  return '<li class="orow" id="O-' + id + '"><div class="orow-h"><div class="oinfo"><h3 class="lname">' + esc(o.l.name) + '</h3>' + (meta ? '<div class="lmeta">' + meta + '</div>' : '') + '</div>' + side + '</div>' +
+    (ro() ? '' : orderStepper(o.l, o, true)) + '</li>';
 }
 function orderTab() {
   const list = orderList(), have = totals({ live: true }).lines;
-  let h = openOrdersHTML() + '<p class="hint">' + (ro() ? 'Lines flagged to order show here.' : 'Tap Order on a line in Count to put it on this list. Nothing is added on its own.') + '</p>';
-  h += '<h2 class="sub-title go">To order <span class="n">' + list.length + '</span></h2>';
-  h += list.length ? '<div class="olist">' + list.map((o) => orderRow(o, have[o.l.id] ? have[o.l.id].sum.v : null)).join('') + '</div>' : empty('Nothing is flagged to order.');
+  let h = openOrdersHTML() + '<h2 class="sub-title go" id="ord-h" tabindex="-1">To order <span class="n">' + list.length + '</span></h2>';
+  if (!list.length) {
+    return h + '<div class="empty ord-empty"><p>' + (ro() ? 'Nothing is flagged to order.' : 'Nothing is flagged yet. Go to Count and tap Order on any line. Nothing lands here on its own.') + '</p>' +
+      '<div class="row-actions"><button class="btn small" data-act="go" data-id="#count">Go to Count</button></div></div>';
+  }
+  h += '<p class="hint">' + esc(ro() ? 'Flagged by hand, shared by everyone who orders.' : 'Flagged by hand, on Count or Items. Everyone who orders sees the same list.') + '</p>';
+  h += '<ul class="olist">' + list.map((o) => orderRow(o, have[o.l.id])).join('') + '</ul>';
   h += '<h2 class="sub-title">Message for ' + esc(I().messaging || 'team chat') + '</h2><pre class="chit" id="order-text">' + esc(orderText(list)) + '</pre>';
-  h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button>' + (ro() || !list.length ? '' : '<button class="btn" data-act="order-place">' + ICON.check + ' Order placed</button>') + '</div>';
-  if (!ro()) h += '<p class="hint">Order placed files the order in History, where everyone who orders can see it and mark it received, and clears this list.</p>';
-  h += '<p class="hint">Counts are saved on Count, one room at a time.</p>';
+  h += '<div class="row-actions"><button class="btn primary" data-act="ord-copy">' + ICON.copy + ' Copy</button><button class="btn ghost" data-act="ord-share">' + ICON.share + ' Share</button></div>';
+  if (!ro()) h += '<section class="oplace" aria-labelledby="oplace-h"><h2 class="sub-title" id="oplace-h">Once it’s ordered</h2><div class="row-actions"><button class="btn" data-act="order-place">' + ICON.check + ' Order placed</button></div>' +
+    '<p class="hint">Tap it twice. It files the order in History, where everyone who orders can mark it received, and clears this list.</p></section>';
   return h;
 }
 /* Show a line's order amount again (after a change), and the message with it. */
@@ -519,10 +534,17 @@ function showOrderQty(lineId, force) {
 }
 const NO_FLAG = 'View only: changing the order list needs write access.';
 /* Off the list. On Count the line stays, so only its order row changes and focus goes back to its
-   Order button; on the Order tab the row goes, so the tab is drawn again. */
+   Order button; on the Order tab the row goes, so the tab is drawn again and focus moves to the next
+   line's Remove (or the one before, or the heading when the list is empty). */
 function unflag(lineId) {
+  const onLine = !!document.getElementById('LQ-' + lineId), list = orderList(), i = list.findIndex((o) => o.l.id === lineId);
   setFlag(lineId, false);
-  if (document.getElementById('LQ-' + lineId)) refreshFlag(lineId, true); else app.renderView();
+  if (onLine) refreshFlag(lineId, true);
+  else {
+    app.renderView();
+    const next = list[i + 1] || list[i - 1], to = (next && document.getElementById('OR-' + next.l.id)) || document.getElementById('ord-h');
+    if (to) try { to.focus(); } catch (e) { /* ignore */ }
+  }
   toast('Taken off the order list.');
 }
 /* Plus or minus one on a flagged line. Minus at 1 takes it off the list. */
@@ -534,15 +556,23 @@ function stepFlag(lineId, d) {
   setFlagAmount(lineId, f.n + d); showOrderQty(lineId);
 }
 
-/* ---------- history ---------- */
+/* ---------- history ----------
+   Each saved count says which room it's of, the day and time it was saved, and who counted. The
+   newest count of each room is marked "In Totals": it's the one Totals adds up, whole. */
+const clock = (v) => { if (!/T/.test(String(v || ''))) return ''; const d = new Date(v); return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); };
 function historyTab() {
   const H = hist();
-  if (!H.length) return empty('No saved counts or orders yet. Save a count or place an order from the Order tab and it shows up here.');
-  return '<p class="hint">Saved counts and orders from everyone, newest first.</p>' + H.map((e) => {
-    const n = Object.keys(e.counts || {}).length, st = orderState(e, H);
-    const tag = st !== 'none' ? '<span class="otag o-' + ORDER_CLASS[st] + '">' + esc(orderLine(e, st)) + '</span>' : '';
-    return '<details class="hist"><summary><span class="hdate">' + esc(dateOf(e.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })) + '</span><span class="hby">' + esc(e.by || '') + '</span><span class="hsum">' + (isOrder(e) ? 'Order · ' + esc(e.orderCount) + ' item' + (e.orderCount === 1 ? '' : 's') : n + ' products counted' + (e.orderCount ? ' · ' + esc(e.orderCount) + ' to order' : '')) + '</span>' + tag + '</summary>' +
-      '<div class="hbody"><pre class="chit">' + esc(e.text || '') + '</pre>' + (st !== 'none' && st !== 'replaced' ? '<div class="row-actions">' + orderButtons(e, st, true) + '</div>' : '') + '<div class="row-actions"><button class="btn small" data-act="hist-copy" data-id="' + esc(e.id) + '">' + ICON.copy + ' Copy</button>' + (ro() ? '' : '<button class="btn small danger" data-act="hist-del" data-id="' + esc(e.id) + '">' + ICON.trash + ' Delete</button>') + '</div></div></details>';
+  if (!H.length) return empty('No saved counts or orders yet. Save a count on Count, or place an order from the Order tab, and it shows up here.');
+  const used = totals().rooms;
+  return '<p class="hint">Saved counts and orders from everyone, newest first. Totals adds up the newest count of each room.</p>' + H.map((e) => {
+    const n = Object.keys(e.counts || {}).length, st = orderState(e, H), ord = isOrder(e), room = placeOf(e), at = clock(e.savedAt);
+    const inTot = !ord && used[room] && used[room].id === e.id;
+    const tags = (inTot ? '<span class="otag o-room">In Totals</span>' : '') + (st !== 'none' ? '<span class="otag o-' + ORDER_CLASS[st] + '">' + esc(orderLine(e, st)) + '</span>' : '');
+    const what = ord ? 'Order · ' + esc(e.orderCount) + ' item' + (e.orderCount === 1 ? '' : 's')
+      : '<b class="hroom">' + esc(placeName(room)) + '</b> count · ' + n + ' product' + (n === 1 ? '' : 's') + ' counted' + (e.orderCount ? ' · ' + esc(e.orderCount) + ' to order' : '');
+    const who = [e.by ? (ord ? 'by ' : 'counted by ') + e.by : '', at].filter(Boolean).join(' · ');
+    return '<details class="hist"><summary><span class="hdate">' + esc(dateOf(e.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })) + '</span><span class="hby">' + esc(who) + '</span><span class="hsum">' + what + '</span>' + (tags ? '<span class="htags">' + tags + '</span>' : '') + '</summary>' +
+      '<div class="hbody"><pre class="chit">' + esc(e.text || '') + '</pre>' + (st !== 'none' && st !== 'replaced' ? '<div class="row-actions">' + orderButtons(e, st, true) + '</div>' : '') + '<div class="row-actions"><button class="btn small" data-act="hist-copy" data-id="' + esc(e.id) + '">' + ICON.copy + ' Copy</button>' + (ro() ? '' : '<button class="btn small danger" data-act="hist-del" data-id="' + esc(e.id) + '" data-kind="' + (ord ? 'order' : 'count') + '">' + ICON.trash + ' Delete</button>') + '</div></div></details>';
   }).join('');
 }
 
@@ -841,6 +871,8 @@ export const acts = {
     el.setAttribute('aria-pressed', flagOf(l) ? 'true' : 'false');
     refreshFlag(id);
   },
+  // Remove, on the Order tab: off the shared list in one tap, like the Order button on Count.
+  'ord-remove': (el) => { if (ro()) { toast(NO_FLAG); return; } const l = lines().find((x) => x.id === el.dataset.line); if (l && flagOf(l)) unflag(l.id); },
   'ord-inc': (el) => stepFlag(el.dataset.line, 1),
   'ord-dec': (el) => stepFlag(el.dataset.line, -1),
   'ord-copy': async () => { if (await copyText(orderText(orderList()))) toast('Order copied.'); },
@@ -867,7 +899,7 @@ export const acts = {
   'count-new-no': () => { confirmNew = false; app.renderView(); },
   'count-new-yes': () => { freshCount(); confirmNew = false; toast('Started the ' + placeName(roomNow()) + ' count over.'); app.go('#count'); },
   'hist-copy': async (el) => { const e = hist().find((x) => x.id === el.dataset.id); if (e && await copyText(e.text || '')) toast('Copied.'); },
-  'hist-del': (el) => { if (ro()) return; if (!armed(el, 'Delete this count?')) return; edit('counts', (c) => { c.history = (c.history || []).filter((x) => x.id !== el.dataset.id); markGone(c, el.dataset.id); }); autoSync('save', 800); app.renderView(); toast('Deleted.'); },
+  'hist-del': (el) => { if (ro()) return; if (!armed(el, el.dataset.kind === 'order' ? 'Delete this order?' : 'Delete this count?')) return; edit('counts', (c) => { c.history = (c.history || []).filter((x) => x.id !== el.dataset.id); markGone(c, el.dataset.id); }); autoSync('save', 800); app.renderView(); toast('Deleted.'); },
   'ord-placed': (el) => { setOrder(el.dataset.id, (o) => { o.status = 'placed'; o.placedAt = new Date().toISOString(); o.placedBy = whoAmI(); }); app.renderView(); toast('Marked placed.'); },
   'ord-received': (el) => { setOrder(el.dataset.id, (o) => { o.status = 'received'; o.receivedAt = new Date().toISOString(); o.receivedBy = whoAmI(); }); app.renderView(); toast('Marked received.'); },
   'ord-unplace': (el) => { if (!armed(el, 'Not placed?')) return; setOrder(el.dataset.id, (o) => { o.status = 'saved'; delete o.placedAt; delete o.placedBy; }); app.renderView(); },

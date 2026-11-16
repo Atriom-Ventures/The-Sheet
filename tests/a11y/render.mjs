@@ -104,6 +104,8 @@ save('sheet-notes-report', act('notes', { seg: 'report' }));
 save('sheet-notes-earlier', act('notes', { seg: 'earlier' }));
 S.shift.sentAt = '12:30'; S.shift.sentHow = 'copied';
 save('sheet-notes-sent', act('notes', {}));
+// The Order tab with nothing on it (the sample has one line flagged; Remove takes it off).
+location.hash = '#count/order'; app.acts['ord-remove']({ dataset: { line: 'ln-tea' } }); app.renderView(); save('count-order-empty', mk('view').innerHTML);
 // My jobs, for anyone who turns it back on.
 S.settings.showJobs = true; location.hash = '#lead'; location.hash = '#now'; save('now-with-jobs', mk('view').innerHTML); S.settings.showJobs = false;
 console.log(out);

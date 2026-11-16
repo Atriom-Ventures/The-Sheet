@@ -72,6 +72,12 @@ if (mode !== 'none') {
   T.check(/role="dialog"/.test(pn) && /On hand/.test(pn) && /Case size/.test(pn) && /Order this time/.test(pn) && /More:/.test(pn) && !/Something went wrong/.test(pn), 'Items: a line’s panel opens');
   const how = open('inv-how', { line: 'ln-cups' });
   T.check(/How it’s counted/.test(how) && /data-ie="unit"/.test(how), 'Items: tapping a size opens how it’s counted');
+  // The Order tab once its last line is removed.
+  location.hash = '#count/order'; await new Promise((r) => setTimeout(r, 10));
+  app.acts['ord-remove']({ dataset: { line: 'ln-tea' }, classList: { add() {}, remove() {} }, setAttribute() {}, removeAttribute() {} });
+  app.renderView(); // this fake page has an element for every id, so the act takes it for Count and doesn't redraw
+  const ov = mk('view').innerHTML;
+  T.check(/Nothing is flagged yet/.test(ov) && /data-act="go" data-id="#count"/.test(ov) && !/Something went wrong/.test(ov), 'Order: removing the last line leaves the empty list, with a way to Count');
 }
 T.check(/Not connected|Synced|Changes|Sync problem|Connected|Syncing/.test(mk('top-in').innerHTML), 'status chip shows');
 console.error = origErr;

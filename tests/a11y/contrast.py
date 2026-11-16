@@ -26,7 +26,7 @@ PAIRS = [
  ('stop','stop-soft',4.5,'Out pill'), ('stop','surface',4.5,'warn-t text'), ('stop','bg',4.5,'warn-t on page'), ('surface','stop',4.5,'pill.late'),
  ('plenty','plenty-soft',4.5,'Plenty pill'), ('none','none-soft',4.5,'tags'), ('band-ink','band',4.5,'blue bands'), ('band-ink','band-2',4.5,'grey bands'),
  ('marker','marker-soft',4.5,'clash panel'), ('ink','marker-soft',4.5,'clash text'), ('muted','marker-soft',4.5,'clash hint'), ('muted','lamp-soft',4.5,'hint in note'),
- ('ink','lamp-soft',4.5,'note text'), ('ink','go-soft',4.5,'text on go-soft'),
+ ('ink','lamp-soft',4.5,'note text'), ('stop','lamp-soft',4.5,'warning in a note: access lost, order list changed since copied'), ('ink','go-soft',4.5,'text on go-soft'),
  ('hero-ink','hero-bg',4.5,'hero text'), ('hero-dim','hero-bg',4.5,'hero secondary'), ('hero-lamp','hero-bg',4.5,'hero lamp text'),
  ('focus','bg',3,'focus ring vs page'), ('focus','surface',3,'focus ring vs panel'),
  ('field-line','surface',3,'input borders'), ('field-line','sunk',3,'input borders on sunk'), ('field-line','bg',3,'field borders on page'), ('lamp','bg',3,'active tab bar'),

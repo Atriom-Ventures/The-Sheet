@@ -190,9 +190,30 @@ function unitPar(base, local, remote, m) {
 }
 /* Order flags on a line have rules of their own (a cleared flag stays cleared; an amount and its unit
    travel together). They live with the rest of the flag code: mergeFlags in stock.js. */
+/* Saved counts and orders never collide, so two phones that each tap Order placed before syncing leave
+   two orders. Both are kept: each person did say an order went in. When they hold some of the same
+   lines and were filed within a day of each other, the phone that syncs second is told, in case the
+   same order was sent twice. */
+function twinOrders(base, local, remote, m) {
+  if (!m.doc || !Array.isArray(m.doc.history)) return;
+  const orders = (d) => (d && Array.isArray(d.history) ? d.history : []).filter((h) => h && h.kind === 'order' && typeof h.id === 'string' && Array.isArray(h.lines));
+  const old = new Set((base && Array.isArray(base.history) ? base.history : []).map((h) => h && h.id)), kept = new Set(m.doc.history.map((h) => h && h.id));
+  const fresh = (d, not) => orders(d).filter((h) => !old.has(h.id) && kept.has(h.id) && !not.has(h.id));
+  const ids = (d) => new Set(orders(d).map((h) => h.id));
+  const mine = fresh(local, ids(remote)), theirs = fresh(remote, ids(local));
+  const when = (h) => Date.parse(h.savedAt || h.date || '');
+  for (const a of mine) for (const b of theirs) {
+    if (!(Math.abs(when(a) - when(b)) <= 24 * 60 * 60 * 1000)) continue;
+    const there = new Set(b.lines.map((x) => x && x.line)), both = a.lines.filter((x) => x && there.has(x.line)).map((x) => String(x.name || 'a line'));
+    if (!both.length) continue;
+    const names = both.slice(0, 3).join(', ') + (both.length > 3 ? ' and ' + (both.length - 3) + ' more' : '');
+    m.conflicts.push({ path: '.history[' + a.id + ']', kept: 'both', who: String(b.by || ''), note: 'You and ' + (b.by ? String(b.by) : 'another phone') + ' each filed an order before syncing, and both have ' + names + '. Both orders are in History. If it was only sent once, delete one of them there' });
+  }
+}
 function merge3(key, base, local, remote, o) {
   const m = mergeDoc(base, local, remote, mergeOpts(key, o));
   if (key === 'inv') { unitPar(base, local, remote, m); mergeFlags(base, local, remote, m, o); }
+  if (key === 'counts') twinOrders(base, local, remote, m);
   return m;
 }
 

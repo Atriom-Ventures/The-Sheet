@@ -104,6 +104,8 @@ save('sheet-notes-report', act('notes', { seg: 'report' }));
 save('sheet-notes-earlier', act('notes', { seg: 'earlier' }));
 S.shift.sentAt = '12:30'; S.shift.sentHow = 'copied';
 save('sheet-notes-sent', act('notes', {}));
+// The Order tab when the list has changed since its message was copied.
+location.hash = '#count/order'; S.msgs['order-sent'] = { __daily: true, __day: 'x', lines: { 'ln-tea': [1, 'box', 'Tea, assorted'], 'ln-soap': [1, 'each', 'Dish soap'] } }; app.renderView(); save('count-order-changed', mk('view').innerHTML); delete S.msgs['order-sent'];
 // The Order tab with nothing on it (the sample has one line flagged; Remove takes it off).
 location.hash = '#count/order'; app.acts['ord-remove']({ dataset: { line: 'ln-tea' } }); app.renderView(); save('count-order-empty', mk('view').innerHTML);
 // My jobs, for anyone who turns it back on.

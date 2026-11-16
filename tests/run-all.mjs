@@ -29,6 +29,7 @@ step('Shift notes: held, never blocked', node, [path.join(HERE, 'notes.test.mjs'
 step('Saves when the app goes to the background', node, [path.join(HERE, 'background.test.mjs')]);
 step('Backups leave out daily and personal data', node, [path.join(HERE, 'backup.test.mjs')]);
 step('Offline files; nothing loaded from outside', node, [path.join(HERE, 'offline.test.mjs')]);
+step('A new version whenever app files change', node, [path.join(HERE, 'version.test.mjs')]);
 step('Floor plans', node, [path.join(HERE, 'maps.test.mjs')]);
 step('Allergen card: pages from rows, kitchen check', node, [path.join(HERE, 'card.test.mjs')]);
 step('Allergen card fits Letter (real browser)', 'python3', [path.join(HERE, 'card-fit.py')]);

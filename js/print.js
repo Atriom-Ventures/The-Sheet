@@ -63,7 +63,19 @@ export function printWhat(t) {
   });
 }
 
+/* On a phone, window.print() returns before anything is printed: Chrome and Firefox on Android both say
+   "afterprint" straight away and make the PDF afterwards. So the printout stays in place, hidden on
+   screen (it only shows in print), until the person is back in the app and taps or types. */
+let printing = false;
+function endPrint() {
+  if (!printing) return;
+  printing = false;
+  window.removeEventListener('pointerdown', endPrint, true); window.removeEventListener('keydown', endPrint, true);
+  document.body.classList.remove('printing');
+  const root = $('#print-root'); if (root) root.innerHTML = '';
+}
 function go(t) {
+  endPrint();
   const where = ($('#pr-where') && $('#pr-where').value.trim()) || '';
   if ($('#pr-drafts')) t.drafts = $('#pr-drafts').checked;
   const info = target(t);
@@ -82,10 +94,11 @@ function go(t) {
   st.textContent = stampCSS(stampText);
   root.innerHTML = build(t, info);
   document.body.classList.add('printing');
-  const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); app.render(); };
-  window.addEventListener('afterprint', done);
+  printing = true;
+  window.addEventListener('pointerdown', endPrint, true); window.addEventListener('keydown', endPrint, true);
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    try { window.print(); } catch (e) { toast('This browser can’t print from here.'); done(); }
+    try { window.print(); } catch (e) { toast('This browser can’t print from here.'); endPrint(); }
+    app.render(); // e.g. Lead → Printed, if the copy was logged. The printout isn't on screen, so this doesn't touch it.
     if (where) toast('Logged: ' + info.label + ' → ' + where);
   }));
 }

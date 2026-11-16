@@ -602,9 +602,7 @@ body.quick .view{padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px))}
 
 /* ---------- print ---------- */
 .print-root{display:none}
-/* No paper size here: Firefox on Android mis-scales a page that sets one (Mozilla bug 1918861), so the
-   printer's own paper is used (Letter in the US). The allergen card still sets Letter on its pages (@page card). */
-@page{margin:.5in .55in .6in;@bottom-right{content:"Page " counter(page);font:9pt sans-serif;color:#555}}
+@page{size:letter;margin:.5in .55in .6in;@bottom-right{content:"Page " counter(page);font:9pt sans-serif;color:#555}}
 /* Floor plans. Map units are "squares"; the SVG scales to the screen. */
 .map{display:block;width:100%;height:auto;max-height:72vh;background:var(--sunk);border:1px solid var(--line);border-radius:12px}
 .map.small{max-height:none;border:none;border-radius:8px;background:var(--sunk)}
@@ -643,7 +641,8 @@ body.quick .view{padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px))}
   body:not(.printing) .top,body:not(.printing) .nav,body:not(.printing) .toast{display:none!important}
   .pv-rev{font:8pt var(--f-mono);color:#555;margin:0 0 6pt}
   .pv-map{break-before:page}
-  .pv-map:first-child{break-before:auto}
+  /* Whatever comes first never starts a new page: Chrome drops a page break at the very top, Firefox prints a blank page for it. */
+  .print-root>:first-child{break-before:auto}
   .pv-map .map{width:100%;max-height:7.6in;background:#fff;border:none}
   .pv-map .m-room{fill:#fff;stroke:#000}
   .pv-map .m-shape{fill:#E2EBF8;stroke:#2A5FA8}

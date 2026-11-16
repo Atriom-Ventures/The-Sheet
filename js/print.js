@@ -66,7 +66,7 @@ export function printWhat(t) {
 /* On a phone, window.print() returns before anything is printed: Chrome and Firefox on Android both say
    "afterprint" straight away and make the PDF afterwards. So the printout stays in place, hidden on
    screen (it only shows in print), until the person is back in the app and taps or types. */
-let printing = false;
+let printing = false, printRun = 0;
 function endPrint() {
   if (!printing) return;
   printing = false;
@@ -79,7 +79,7 @@ function go(t) {
   const where = ($('#pr-where') && $('#pr-where').value.trim()) || '';
   if ($('#pr-drafts')) t.drafts = $('#pr-drafts').checked;
   const info = target(t);
-  closeSheet();
+  const back = closeSheet(); // settles once the browser has gone back from the sheet
   if (where) {
     edit('state', (s) => {
       s.printed = s.printed || [];
@@ -95,12 +95,16 @@ function go(t) {
   root.innerHTML = build(t, info);
   document.body.classList.add('printing');
   printing = true;
-  window.addEventListener('pointerdown', endPrint, true); window.addEventListener('keydown', endPrint, true);
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    try { window.print(); } catch (e) { toast('This browser can’t print from here.'); endPrint(); }
+  // Print only once the browser has gone back from the closed sheet: Firefox on Android printed an empty
+  // "about:blank" page when the two overlapped. A newer print started meanwhile replaces this one.
+  const run = ++printRun;
+  back.then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (run !== printRun || !printing) return;
+    try { window.print(); } catch (e) { toast('This browser can’t print from here.'); endPrint(); return; }
+    window.addEventListener('pointerdown', endPrint, true); window.addEventListener('keydown', endPrint, true);
     app.render(); // e.g. Lead → Printed, if the copy was logged. The printout isn't on screen, so this doesn't touch it.
     if (where) toast('Logged: ' + info.label + ' → ' + where);
-  }));
+  })));
 }
 
 /* ---------- builders ---------- */
